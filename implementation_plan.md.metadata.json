@@ -1,0 +1,7 @@
+{
+  "artifactType":  "ARTIFACT_TYPE_IMPLEMENTATION_PLAN",
+  "summary":  "Implementation plan for building a Hybrid AI Router linking local Gemma and cloud Gemini, incorporating the user's framework.",
+  "updatedAt":  "2026-05-03T20:34:01.660170400Z",
+  "version":  "2",
+  "requestFeedback":  true
+}

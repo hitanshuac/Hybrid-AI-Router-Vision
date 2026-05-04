@@ -1,0 +1,44 @@
+# Setting up Gemma Locally
+
+This plan details the steps to set up and run Google's Gemma models locally on your Windows machine. The easiest and most efficient way to achieve this is by using **Ollama**, an open-source tool designed to run large language models locally.
+
+## User Review Required
+
+> [!IMPORTANT]
+> Installing Ollama and downloading Gemma models requires downloading significant amounts of data (anywhere from 1.5GB to 20GB+ depending on the model size). Please make sure you have a stable internet connection and sufficient disk space before approving.
+
+## Open Questions
+
+> [!QUESTION]
+> **Which model size would you like to use?**
+> Gemma comes in different sizes. The right choice depends on your system's RAM and VRAM (Graphics Card):
+> 1. **Gemma 4:e2b / e4b (2B - 4B parameters):** Extremely fast, runs on almost any machine (requires ~4GB RAM).
+> 2. **Gemma 4 (Default / 7B-9B class):** A good balance of speed and intelligence (requires ~8GB+ RAM).
+> 3. **Gemma 4:26b or 31b:** Very intelligent, but requires a powerful machine (16GB - 32GB+ RAM / strong GPU).
+> *If you're unsure, I recommend starting with `gemma4` or `gemma3:4b`.*
+
+> [!QUESTION]
+> Are you planning to use Gemma programmatically (e.g., building an app via Python) or do you just want to interact with it via a chat interface in the terminal? (Ollama supports both, but I can tailor the test script if you want Python integration).
+
+## Proposed Changes
+
+We will execute the following steps:
+
+1. **Install Ollama:** We will use the Windows Package Manager (`winget`) to install Ollama silently.
+2. **Start Ollama:** We will ensure the Ollama background service is running.
+3. **Pull and Run Gemma:** Based on your hardware preference, we will download and run the appropriate Gemma model (e.g., `ollama run gemma4`).
+
+### Scripts & Commands
+
+#### [NEW] Command Execution
+- Run `winget install Ollama.Ollama` to install the engine.
+- Run `ollama run <chosen_model>` to pull the weights and start the model.
+
+## Verification Plan
+
+### Automated Tests
+- Run `ollama list` to verify the model has been downloaded successfully.
+- Run a test prompt against the Ollama local API (e.g., via `curl` or a short Python script) to ensure the model responds correctly.
+
+### Manual Verification
+- You will be able to open a terminal, type `ollama run <chosen_model>`, and chat directly with Gemma.

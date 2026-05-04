@@ -1,0 +1,12 @@
+{
+  "hardware": {
+    "gpu": "RTX 4060",
+    "vram_gb": 8,
+    "system_ram_gb": 24,
+    "cpu": "Intel i5 12450hx"
+  },
+  "rules": {
+    "model_selection": "NEVER pull a model without first verifying its exact file size via `ollama show` or registry API. Model size MUST be < vram_gb to prevent PCIe bottlenecking.",
+    "autonomous_correction": "During background executions, if output logs reveal constraints are violated (e.g., download size exceeds VRAM), terminate the process immediately and self-correct."
+  }
+}
