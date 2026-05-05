@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # --- THE BRAIN: Hybrid AI Router ---
+  hybrid-router:
+    build: .
+    container_name: hybrid-ai-router
+    restart: always
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    volumes:
+      - ./secrets:/app/secrets
+    stdin_open: true
+    tty: true
+    networks:
+      - ai-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect(('localhost', 8000))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # --- MOBILE ACCESS: Telegram Bot ---
+  hybrid-bot:
+    build: .
+    container_name: hybrid-ai-bot
+    restart: always
+    command: python -m src.bot
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    volumes:
+      - ./secrets:/app/secrets
+    networks:
+      - ai-network
+    depends_on:
+      hybrid-router:
+        condition: service_started
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # --- THE FACE: Open WebUI ---
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: always
+    ports:
+      - "3000:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - WEBUI_SECRET_KEY=antigravity_secret_key_2026
+    volumes:
+      - open-webui-data:/app/backend/data
+    networks:
+      - ai-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  ai-network:
+    driver: bridge
+
+volumes:
+  open-webui-data:
