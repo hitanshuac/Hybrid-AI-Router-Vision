@@ -1,5 +1,5 @@
 """
-Hybrid AI Router — Local LLM Client (Ollama)
+Hybrid AI Router â€” Local LLM Client (Ollama)
 =============================================
 Handles all communication with the local Ollama server.
 Includes:
@@ -12,9 +12,9 @@ TROUBLESHOOTING:
     FIX (Windows): Open Start menu > search "Ollama" > click to launch.
     FIX (Terminal): Open a NEW terminal and run 'ollama serve'.
   - "Read Timeout": The model is taking too long. Common causes:
-    1. Cold start — Ollama is loading the model into GPU VRAM (~30s first time).
-    2. Long prompt — Gemma needs more time for complex queries.
-    3. GPU busy — Another app is using your RTX 4060 VRAM.
+    1. Cold start â€” Ollama is loading the model into GPU VRAM (~30s first time).
+    2. Long prompt â€” Gemma needs more time for complex queries.
+    3. GPU busy â€” Another app is using your RTX 4060 VRAM.
     FIX: Check GPU usage with 'nvidia-smi' in terminal.
     FIX: Close other GPU-heavy apps (games, other AI tools).
   - "Model not found": Run 'ollama pull gemma2:9b' to download it.
@@ -23,6 +23,7 @@ TROUBLESHOOTING:
 import logging
 import time
 import requests
+from src.observability import trace_span
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -50,7 +51,7 @@ class LocalTransientError(Exception):
 
 
 # ============================================================
-# CORE LOCAL QUERY — With retry logic
+# CORE LOCAL QUERY â€” With retry logic
 # ============================================================
 @retry(
     retry=retry_if_exception_type(LocalTransientError),
@@ -59,6 +60,7 @@ class LocalTransientError(Exception):
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
+@trace_span("ollama_generate")
 def _query_local_with_retry(prompt, model):
     """
     Internal function that makes the actual Ollama API call.
@@ -131,7 +133,7 @@ def _query_local_with_retry(prompt, model):
 
 
 # ============================================================
-# PUBLIC API — Called by router.py
+# PUBLIC API â€” Called by router.py
 # ============================================================
 def query_local(prompt, model=None):
     """

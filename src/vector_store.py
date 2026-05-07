@@ -1,90 +1,93 @@
-﻿import os
+import os
 import logging
 import chromadb
 from chromadb.config import Settings
+from src.observability import trace_span
 
 logger = logging.getLogger("vector_store")
 
-DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "chroma_db")
+DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "chroma_db_v2")
 
 # Initialize ChromaDB
 try:
     chroma_client = chromadb.PersistentClient(path=DB_DIR, settings=Settings(anonymized_telemetry=False))
     
-    # Collection for Semantic Caching (Routing)
-    cache_collection = chroma_client.get_or_create_collection(
-        name="semantic_cache",
-        metadata={"hnsw:space": "cosine"}
-    )
-    
-    # Collection for RAG Documents
-    rag_collection = chroma_client.get_or_create_collection(
-        name="rag_docs",
-        metadata={"hnsw:space": "cosine"}
-    )
+    # Collections
+    cache_collection = chroma_client.get_or_create_collection(name="semantic_cache")
+    rag_collection = chroma_client.get_or_create_collection(name="rag_docs")
+    logic_collection = chroma_client.get_or_create_collection(name="logic_library")
     
     logger.info(f"ChromaDB initialized at {DB_DIR}")
 except Exception as e:
     logger.error(f"Failed to initialize ChromaDB: {e}")
     cache_collection = None
     rag_collection = None
+    logic_collection = None
 
-def add_to_cache(prompt, response, model_label, embedding):
-    if not cache_collection: return
-    # Use prompt hash as ID
-    safe_id = str(hash(prompt))
-    try:
-        # ChromaDB might throw if ID already exists, so we use upsert or just ignore
-        cache_collection.upsert(
-            ids=[safe_id],
-            embeddings=[embedding],
-            documents=[prompt],
-            metadatas=[{"response": response, "model": model_label}]
-        )
-    except Exception as e:
-        logger.error(f"Failed to add to cache: {e}")
-
-def check_cache(embedding, threshold=0.95):
+@trace_span("check_cache")
+def check_cache(query_embedding):
     if not cache_collection: return None
     try:
         results = cache_collection.query(
-            query_embeddings=[embedding],
+            query_embeddings=[query_embedding.tolist() if hasattr(query_embedding, 'tolist') else query_embedding],
             n_results=1
         )
         if results['distances'] and len(results['distances'][0]) > 0:
-            # ChromaDB cosine distance: 0 is identical, 1 is orthogonal
-            # Similarity = 1 - distance
-            distance = results['distances'][0][0]
-            similarity = 1.0 - distance
-            if similarity >= threshold:
-                meta = results['metadatas'][0][0]
-                return meta['response'], meta['model'] + " (Chroma Cached)"
+            # 0.05 distance = 0.95 similarity
+            if results['distances'][0][0] < 0.05:
+                return results['metadatas'][0][0]['response'], results['metadatas'][0][0]['model']
     except Exception as e:
-        logger.error(f"Failed to check cache: {e}")
+        logger.error(f"Cache lookup failed: {e}")
     return None
 
-def add_rag_chunks(chunks, embeddings, metadatas, ids):
-    if not rag_collection: return
+def add_to_cache(query, response, model, embedding):
+    if not cache_collection: return
     try:
-        rag_collection.upsert(
-            ids=ids,
-            embeddings=embeddings,
-            documents=chunks,
-            metadatas=metadatas
+        cache_collection.add(
+            ids=[str(hash(query))],
+            embeddings=[embedding.tolist() if hasattr(embedding, 'tolist') else embedding],
+            metadatas=[{"response": response, "model": model}],
+            documents=[query]
         )
-        logger.info(f"Added {len(chunks)} chunks to RAG collection.")
     except Exception as e:
-        logger.error(f"Failed to add RAG chunks: {e}")
+        logger.error(f"Cache storage failed: {e}")
 
+@trace_span("search_rag")
 def search_rag(embedding, top_k=2):
     if not rag_collection: return []
     try:
         results = rag_collection.query(
-            query_embeddings=[embedding],
+            query_embeddings=[embedding.tolist() if hasattr(embedding, 'tolist') else embedding],
             n_results=top_k
         )
         if results['documents'] and len(results['documents'][0]) > 0:
             return results['documents'][0]
     except Exception as e:
-        logger.error(f"Failed to search RAG: {e}")
+        logger.error(f"RAG search failed: {e}")
     return []
+
+# --- Logic Library (Distillation) ---
+def add_logic_trace(query, reasoning, response, embedding):
+    if not logic_collection: return
+    try:
+        logic_collection.add(
+            ids=[str(hash(query))],
+            embeddings=[embedding.tolist() if hasattr(embedding, 'tolist') else embedding],
+            metadatas=[{"reasoning": reasoning, "response": response}],
+            documents=[query]
+        )
+    except Exception as e:
+        logger.error(f"Logic storage failed: {e}")
+
+def get_logic_trace(embedding, n_results=1):
+    if not logic_collection: return None
+    try:
+        results = logic_collection.query(
+            query_embeddings=[embedding.tolist() if hasattr(embedding, 'tolist') else embedding], 
+            n_results=n_results
+        )
+        if results and results["metadatas"] and len(results["metadatas"][0]) > 0:
+            return results["metadatas"][0][0]
+    except Exception as e:
+        logger.error(f"Logic lookup failed: {e}")
+    return None

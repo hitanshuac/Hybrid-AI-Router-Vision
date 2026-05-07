@@ -1,5 +1,5 @@
 """
-Hybrid AI Router — Cloud LLM Client (Gemini API)
+Hybrid AI Router â€” Cloud LLM Client (Gemini API)
 =================================================
 Handles all communication with the Google Gemini API.
 Includes:
@@ -27,6 +27,7 @@ import time
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from src.observability import trace_span
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -72,7 +73,7 @@ _session.mount("http://", _adapter)
 
 
 # ============================================================
-# CORE CLOUD QUERY — With retry logic
+# CORE CLOUD QUERY â€” With retry logic
 # ============================================================
 @retry(
     retry=retry_if_exception_type(CloudTransientError),
@@ -81,6 +82,7 @@ _session.mount("http://", _adapter)
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
+@trace_span("gemini_generate")
 def _query_cloud_with_retry(prompt, model, image_data=None):
     """
     Internal function that makes the actual API call.
@@ -110,7 +112,7 @@ def _query_cloud_with_retry(prompt, model, image_data=None):
 
         # --- Handle specific HTTP status codes ---
         
-        # Permanent errors — do NOT retry
+        # Permanent errors â€” do NOT retry
         if response.status_code == 401 or response.status_code == 403:
             raise CloudPermanentError(
                 f"API key is invalid or expired ({response.status_code}). "
@@ -123,7 +125,7 @@ def _query_cloud_with_retry(prompt, model, image_data=None):
                 f"FIX: Restart the router to trigger auto-discovery of new model names."
             )
 
-        # Transient errors — DO retry
+        # Transient errors â€” DO retry
         if response.status_code == 429:
             raise CloudTransientError(
                 f"Rate limited (429). Free tier limit reached. Retrying with backoff..."
@@ -134,7 +136,7 @@ def _query_cloud_with_retry(prompt, model, image_data=None):
                 f"Google server error ({response.status_code}). Retrying..."
             )
 
-        # Other 4xx errors — permanent
+        # Other 4xx errors â€” permanent
         if response.status_code >= 400:
             raise CloudPermanentError(
                 f"Unexpected client error ({response.status_code}): {response.text[:200]}"
@@ -176,7 +178,7 @@ def _query_cloud_with_retry(prompt, model, image_data=None):
 
 
 # ============================================================
-# PUBLIC API — Called by router.py
+# PUBLIC API â€” Called by router.py
 # ============================================================
 def query_cloud(prompt, model=None, image_data=None):
     """

@@ -1,14 +1,13 @@
-# Hybrid AI Router: Semantic RAG Orchestration ðŸ§ âš¡ðŸ 
+# Hybrid AI Router: Semantic RAG Orchestration 🧠⚡🏠
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 An intelligent, production-grade AI routing engine that dynamically orchestrates tasks between **local LLMs (Gemma 2)** and **cloud providers (Google Gemini)** using Semantic RAG and Vector Embeddings.
 
 ---
 
-## ðŸ“– Overview
+## 📖 Overview
 
 The **Hybrid AI Router** is designed to maximize cost-efficiency and performance by intelligently delegating tasks. It uses a semantic classifier to understand the complexity of a user prompt and routes it to the most appropriate "tier" of intelligence.
 
@@ -23,7 +22,7 @@ We use **Vector Search (Cosine Similarity)** against "Anchor Vectors" to determi
 
 ---
 
-## ðŸ—ï¸ Architecture
+## 🏗️ Architecture
 
 ```mermaid
 graph TD
@@ -48,83 +47,65 @@ graph TD
 
 ---
 
-## ðŸš€ Key Features
+## 🚀 Getting Started (Native Windows)
 
-- **Semantic Routing**: Real-time vector embedding analysis using `nomic-embed-text`.
-- **Circuit Breaker Pattern**: Graceful fallback logic ensures 100% availability even if cloud APIs or local services fail.
-- **Quota Management**: Intelligent tracking to stay within free-tier limits.
-- **Containerized Deployment**: Fully orchestrated with Docker Compose for "one-click" startup.
-- **Telegram Integration**: Mobile access to your private AI brain.
+While Docker is supported, for maximum performance and stability on Windows, we recommend the **Native Enterprise Stack**:
 
----
-
-## ðŸ› ï¸ Tech Stack
-
-- **Core**: Python 3.10+
-- **Orchestration**: Docker & Docker Compose
-- **Local Intelligence**: Ollama (Gemma 2 9B)
-- **Cloud Intelligence**: Google Gemini API (Pro & Flash)
-- **Vector Math**: NumPy (Cosine Similarity)
-- **Interface**: Open WebUI & Telegram Bot API
-
----
-
-## ðŸš¦ Getting Started
-
-### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+### 1. Prerequisites
 - [Ollama](https://ollama.com/) (running `gemma2:9b` and `nomic-embed-text`)
-- Google Gemini API Key
+- [Python 3.11+](https://www.python.org/downloads/)
+- Google Gemini API Key (stored in `secrets/gemini_api_key.txt`)
 
-### Installation
+### 2. Installation
+```powershell
+git clone https://github.com/your-username/hybrid-ai-router.git
+cd hybrid-ai-router
+pip install -r requirements.txt
+```
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/your-username/hybrid-ai-router.git
-   cd hybrid-ai-router
-   ```
-
-2. **Configure Secrets**:
-   Copy `.env.example` to `.env` and fill in your keys:
-   ```bash
-   cp .env.example .env
-   # Or create secrets/gemini_api_key.txt
-   ```
-
-3. **Spin up the stack**:
-   ```bash
-   docker-compose up -d
-   ```
+### 3. "One-Click" Launch
+Simply double-click the included batch files:
+1.  **`start_router.bat`**: Boots the Semantic Brain (FastAPI).
+2.  **`start_enterprise_system.bat`**: Boots the Open WebUI connected to the Router.
 
 ---
 
-## ðŸ›¡ï¸ Security & Privacy
+## 🔬 Advanced Enterprise Features
 
-- **Secrets Management**: Sensitive keys are loaded from ignored files or environment variables.
-- **Data Sovereignty**: Simple queries never leave your local machine, keeping your most personal data private.
+### 🕵️‍♂️ Phase 4: Observability Engine
+The system includes a deep tracing layer using **SQLite (`traces.db`)**. Every request is logged with latency, model chosen, and a **Faithfulness Score**.
+- **Dashboard**: Run `python scripts/generate_dashboard.py` to see your "Bad Answers" report.
+
+### 🎓 Phase 6: Teacher-Student Learning Loop
+The system "learns" from flagship models. When a query uses Gemini Flash, the system harvests the **Reasoning Trace** and stores it in the **Logic Library**.
+- **Result**: Local Gemma 2 uses these traces as few-shot examples to achieve "Pro-level" reasoning at zero cost.
+
+### 🛡️ Phase 7: Agentic Self-Healing
+A background agent monitors system performance and automatically:
+- Adjusts routing thresholds based on success rates.
+- Updates RAG chunking strategies if retrieval quality drops.
+- Notifies the user of model drift via the Governance Ledger.
 
 ---
-
-## ðŸ“„ License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
----
-
-**Built with â¤ï¸ for the future of Local-First AI.**
 
 ## 🧱 System Constraints & Governance
 
 To ensure production stability and enterprise-grade reliability, this system operates under a strict set of architectural primitives:
 
 ### 1. Data Contract (The Input Boundary)
-The system exposes an **OpenAI-compatible /v1/chat/completions** endpoint. All incoming requests are validated against the following primitives:
-*   **Payload Schema**: Must be valid JSON with a messages list. Malformed payloads or unsupported types trigger a 422 Unprocessable Entity response, ensuring the core routing engine never experiences an unhandled 500 error.
-*   **Multimodal Logic**: Supports base64-encoded images via the image_url standard. If an image is detected, the system immediately executes a **Vision Tier Bypass**, delegating to Gemini Flash to avoid vector-embedding overhead.
-*   **Hard Bottleneck**: Input is capped at **8,192 tokens** (constrained by the 
-omic-embed-text vectorizer). Large documents are intelligently chunked via the RAG pipeline; raw prompt inputs exceeding this limit are truncated to preserve system idempotency.
+The system exposes an **OpenAI-compatible /v1/chat/completions** endpoint. 
+- **Payload Schema**: Strict JSON validation. Malformed payloads trigger 422 errors.
+- **Multimodal Logic**: Supports Vision Tier Bypass via base64 images.
+- **Hard Bottleneck**: Input is capped at **8,192 tokens**.
 
 ### 2. Governance & Truth Protocol
-*   **Hallucination Guardrails**: Every routed response is logged and audited by the **LLM-as-a-Judge (Gemma 2 9B)** framework. Any response scoring below 3.0 on accuracy or helpfulness is flagged for manual review and threshold recalibration.
-*   **Cost-Zero Resilience**: Identical or semantically similar queries (>95% match) are intercepted by the **ChromaDB Semantic Cache**. This guarantees O(1) sub-100ms responses for repeated queries, protecting both cloud API quotas and local GPU compute.
-*   **Failure Fallback**: In the event of a Cloud API 429 Rate Limit or 503 Unavailable, the system follows a deterministic fallback chain: **Tier 2 (Pro) → Tier 1 (Flash) → Tier 0 (Local)**.
+- **Hallucination Guardrails**: Audited by local **Gemma 2 9B (LLM-Judge)**.
+- **Cost-Zero Resilience**: 95% similarity match triggers **Semantic Cache** for $0 cost.
+- **Failure Fallback**: Deterministic fallback: **Pro → Flash → Local**.
+
+---
+
+## 📜 License
+Distributed under the MIT License. See `LICENSE` for more information.
+
+**Built with ❤️ for the future of Local-First AI.**

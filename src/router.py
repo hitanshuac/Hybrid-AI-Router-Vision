@@ -1,12 +1,13 @@
+import time
 """
-Hybrid AI Router â€” Semantic RAG-based Routing Brain
+Hybrid AI Router ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Semantic RAG-based Routing Brain
 ===================================================
 This module calculates vector embeddings of the user's prompt and compares
 them against "Anchor Vectors" for each tier. This provides an intelligent,
 context-aware weighting system for routing decisions.
 
 FALLBACK CHAIN:
-  Tier 2 (Gemini Pro) â†’ fails â†’ Tier 1 (Gemini Flash) â†’ fails â†’ Tier 0 (Local Gemma)
+  Tier 2 (Gemini Pro) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ fails ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ Tier 1 (Gemini Flash) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ fails ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ Tier 0 (Local Gemma)
 """
 
 import logging
@@ -18,6 +19,9 @@ from src.llm_cloud import query_cloud, CloudExhaustedException, CloudPermanentEr
 from src.config import CLOUD_MODEL_LIGHT, CLOUD_MODEL_PRO
 from src.quota import quota_tracker
 from src.prompt_registry import prompt_registry
+from src.observability import Tracer, trace_span
+from src.distiller import harvest_logic
+from src.vector_store import get_logic_trace
 from src.vector_store import check_cache, add_to_cache, search_rag
 
 logger = logging.getLogger("router")
@@ -122,22 +126,25 @@ semantic_router = SemanticRouter()
 
 
 # ============================================================
-# CIRCUIT BREAKER â€” Graceful fallback chain
+# CIRCUIT BREAKER ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â Graceful fallback chain
 # ============================================================
+@trace_span("classify_and_route")
 def classify_and_route(prompt, image_data=None):
-    """
-    Main routing function. Classifies the prompt and sends it to the
-    appropriate model. If the target model fails, falls back gracefully.
-    """
+    Tracer.start_trace(prompt)
+    start_time_total = time.time()
+
     # 1. Check for Image (Multimodal Bypass)
     if image_data:
-        logger.info("ðŸ“¸ Vision request detected. Routing to Gemini Flash (Vision Tier)...")
+        logger.info("Ã°Å¸â€œÂ¸ Vision request detected. Routing to Gemini Flash (Vision Tier)...")
         try:
             response = query_cloud(prompt, model=CLOUD_MODEL_LIGHT, image_data=image_data)
+            elapsed_total = time.time() - start_time_total
+            Tracer.end_trace(response, f"Gemini Flash [{CLOUD_MODEL_LIGHT}] (Cloud Vision)", elapsed_total)
             return response, f"Gemini Flash [{CLOUD_MODEL_LIGHT}] (Cloud Vision)"
         except Exception as e:
             logger.error(f"Vision routing failed: {e}")
-            return "âš ï¸ Vision processing failed.", "ERROR - Vision"
+            Tracer.end_trace("Ã¢Å¡Â Ã¯Â¸Â Vision processing failed.", "ERROR - Vision", 0)
+            return "Ã¢Å¡Â Ã¯Â¸Â Vision processing failed.", "ERROR - Vision"
 
     prompt_emb = get_embedding(prompt)
     
@@ -146,7 +153,9 @@ def classify_and_route(prompt, image_data=None):
         cached_result = check_cache(prompt_emb)
         if cached_result:
             response, model = cached_result
-            logger.info("ðŸŸ¢ SEMANTIC CACHE HIT - Zero Cost Routing.")
+            logger.info("Ã°Å¸Å¸Â¢ SEMANTIC CACHE HIT - Zero Cost Routing.")
+            elapsed_total = time.time() - start_time_total
+            Tracer.end_trace(response, model, elapsed_total)
             return response, model
 
     # 3. Retrieve RAG Context
@@ -154,7 +163,7 @@ def classify_and_route(prompt, image_data=None):
     if prompt_emb:
         rag_chunks = search_rag(prompt_emb)
         if rag_chunks:
-            logger.info(f"ðŸ“š Retrieved {len(rag_chunks)} RAG chunks. Injecting into prompt...")
+            logger.info(f"Ã°Å¸â€œÅ¡ Retrieved {len(rag_chunks)} RAG chunks. Injecting into prompt...")
             rag_context = "\n\n[SYSTEM NOTE: Retrieved Context]\n" + "\n---\n".join(rag_chunks)
 
     final_prompt = prompt + rag_context
@@ -164,51 +173,38 @@ def classify_and_route(prompt, image_data=None):
 
     # ---- TIER 2: Gemini Pro ----
     if tier == "TIER_2_PRO":
-        logger.info("ðŸ§  High complexity detected. Routing to Gemini Pro...")
+        logger.info("Ã°Å¸Â§Â  High complexity detected. Routing to Gemini Pro...")
         try:
             response = query_cloud(final_prompt, model=CLOUD_MODEL_PRO)
-            return response, f"Gemini Pro [{CLOUD_MODEL_PRO}] (Cloud)"
-        except CloudPermanentError as e:
-            logger.warning(f"Gemini Pro permanent error: {e}")
-            logger.warning("Falling back to Gemini Flash...")
-        except CloudExhaustedException as e:
-            logger.warning(f"Gemini Pro exhausted: {e}")
-            logger.warning("Falling back to Gemini Flash...")
-
-        # Fallback: Try Flash instead of Pro
-        try:
-            response = query_cloud(final_prompt, model=CLOUD_MODEL_LIGHT)
-            return response, f"Gemini Flash [{CLOUD_MODEL_LIGHT}] (Cloud â€” Pro fallback)"
+            model_used = f"Gemini Pro [{CLOUD_MODEL_PRO}] (Cloud)"
         except (CloudPermanentError, CloudExhaustedException) as e:
-            logger.warning(f"Gemini Flash also failed: {e}")
-            logger.warning("Falling back to Local Gemma...")
-
-        return _try_local(final_prompt, fallback_reason="Cloud Pro+Flash exhausted")
+            logger.warning(f"Gemini Pro failed: {e}")
+            tier = "TIER_1_FLASH" # Fallback
 
     # ---- TIER 1: Gemini Flash ----
-    if tier == "TIER_1_FLASH":
-        logger.info("âš¡ Technical task detected. Routing to Gemini Flash...")
+    if tier == "TIER_1_FLASH" and not response:
+        logger.info("Ã¢Å¡Â¡ Technical task detected. Routing to Gemini Flash...")
         try:
-            response = query_cloud(final_prompt, model=CLOUD_MODEL_LIGHT)
-            return response, f"Gemini Flash [{CLOUD_MODEL_LIGHT}] (Cloud)"
-        except CloudPermanentError as e:
-            logger.warning(f"Gemini Flash permanent error: {e}")
-            logger.warning("Falling back to Local Gemma...")
-        except CloudExhaustedException as e:
-            logger.warning(f"Gemini Flash exhausted: {e}")
-            logger.warning("Falling back to Local Gemma...")
-
-        response, model_used = _try_local(final_prompt, fallback_reason="Cloud Flash exhausted")
+            # TEACHER-STUDENT LOOP: Harvest reasoning while cloud is active
+            response = harvest_logic(prompt, prompt_emb)
+            if not response:
+                response = query_cloud(final_prompt, model=CLOUD_MODEL_LIGHT)
+            model_used = f"Gemini Flash [{CLOUD_MODEL_LIGHT}] (Cloud - Logic Harvested)"
+        except (CloudPermanentError, CloudExhaustedException) as e:
+            logger.warning(f"Gemini Flash failed: {e}")
+            # Fallback to local handled below
 
     # ---- TIER 0: Local Gemma ----
     if not response:
-        logger.info("ðŸ  General task detected. Routing to Local Gemma...")
+        logger.info("Ã°Å¸ÂÂ  General task detected. Routing to Local Gemma...")
         response, model_used = _try_local(final_prompt, fallback_reason=None)
 
     # Save to ChromaDB cache before returning
     if prompt_emb and not "ERROR" in model_used:
         add_to_cache(prompt, response, model_used, prompt_emb)
 
+    elapsed_total = time.time() - start_time_total
+    Tracer.end_trace(response, model_used, elapsed_total)
     return response, model_used
 
 
@@ -218,9 +214,9 @@ def _try_local(prompt, fallback_reason=None):
         response = query_local(prompt)
         model_label = "Gemma 2 9B (Local)"
         if fallback_reason:
-            model_label += f" â€” FALLBACK ({fallback_reason})"
+            model_label += f" ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â FALLBACK ({fallback_reason})"
         return response, model_label
     except LocalUnavailableException as e:
         logger.error(f"Local model also failed: {e}")
-        error_msg = "âš ï¸  ALL MODELS ARE CURRENTLY UNAVAILABLE."
-        return error_msg, "ERROR â€” No models available"
+        error_msg = "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  ALL MODELS ARE CURRENTLY UNAVAILABLE."
+        return error_msg, "ERROR ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â No models available"
