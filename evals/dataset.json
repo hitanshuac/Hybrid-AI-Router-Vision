@@ -1,0 +1,47 @@
+﻿[
+  {
+    "query": "Hello! How are you today?",
+    "expected_tier": "TIER_0_LOCAL",
+    "description": "Greeting"
+  },
+  {
+    "query": "Write a funny poem about a robot eating a sandwich.",
+    "expected_tier": "TIER_0_LOCAL",
+    "description": "Creative/Simple"
+  },
+  {
+    "query": "What is the capital of Japan?",
+    "expected_tier": "TIER_0_LOCAL",
+    "description": "Factual/Simple"
+  },
+  {
+    "query": "Write a Python script to scrape a website using BeautifulSoup.",
+    "expected_tier": "TIER_1_FLASH",
+    "description": "Coding/Technical"
+  },
+  {
+    "query": "How do I set up a Docker container for a React and Node app?",
+    "expected_tier": "TIER_1_FLASH",
+    "description": "Infrastructure"
+  },
+  {
+    "query": "Explain the difference between SQL and NoSQL databases.",
+    "expected_tier": "TIER_1_FLASH",
+    "description": "Technical Comparison"
+  },
+  {
+    "query": "Design a high-level architecture for a real-time chat application using WebSockets and Redis.",
+    "expected_tier": "TIER_2_PRO",
+    "description": "Architecture/System Design"
+  },
+  {
+    "query": "Analyze the potential ethical implications of using Large Language Models in healthcare diagnosis.",
+    "expected_tier": "TIER_2_PRO",
+    "description": "Complex Reasoning"
+  },
+  {
+    "query": "Compare the performance trade-offs between gRPC and REST for microservices.",
+    "expected_tier": "TIER_2_PRO",
+    "description": "Technical Depth"
+  }
+]

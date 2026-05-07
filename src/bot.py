@@ -3,6 +3,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from src.router import classify_and_route
 from src.config import TELEGRAM_BOT_TOKEN
+from src.context_manager import context_manager
 
 logger = logging.getLogger("bot")
 
@@ -16,9 +17,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Send a "typing" action to keep the user engaged
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
+    # Build prompt with history
+    context_prompt = context_manager.build_prompt(user_id, user_text)
+    
     # Route the message
     try:
-        response, model_used = classify_and_route(user_text)
+        response, model_used = classify_and_route(context_prompt)
+        
+        # Save to history
+        context_manager.add_message(user_id, "user", user_text)
+        context_manager.add_message(user_id, "assistant", response)
         
         full_response = f"🤖 *{model_used}*\n\n{response}"
         

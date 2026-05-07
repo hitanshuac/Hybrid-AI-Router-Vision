@@ -81,7 +81,7 @@ _session.mount("http://", _adapter)
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-def _query_cloud_with_retry(prompt, model):
+def _query_cloud_with_retry(prompt, model, image_data=None):
     """
     Internal function that makes the actual API call.
     Tenacity will automatically retry this on CloudTransientError.
@@ -178,7 +178,7 @@ def _query_cloud_with_retry(prompt, model):
 # ============================================================
 # PUBLIC API — Called by router.py
 # ============================================================
-def query_cloud(prompt, model=None):
+def query_cloud(prompt, model=None, image_data=None):
     """
     Query the Gemini cloud API with full retry and error handling.
     
@@ -196,7 +196,7 @@ def query_cloud(prompt, model=None):
         )
 
     try:
-        return _query_cloud_with_retry(prompt, model)
+        return _query_cloud_with_retry(prompt, model, image_data=image_data)
     except RetryError as e:
         # All retries exhausted (tenacity wraps the last exception)
         logger.error(f"Cloud API exhausted after {MAX_CLOUD_RETRIES} attempts.")

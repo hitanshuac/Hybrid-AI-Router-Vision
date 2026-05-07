@@ -69,6 +69,9 @@ def _query_local_with_retry(prompt, model):
         "model": model,
         "prompt": prompt,
         "stream": False,
+        "options": {
+            "num_ctx": 4096
+        }
     }
 
     try:

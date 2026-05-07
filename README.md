@@ -1,4 +1,4 @@
-# Hybrid AI Router: Semantic RAG Orchestration 🧠⚡🏠
+# Hybrid AI Router: Semantic RAG Orchestration ðŸ§ âš¡ðŸ 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -8,7 +8,7 @@ An intelligent, production-grade AI routing engine that dynamically orchestrates
 
 ---
 
-## 📖 Overview
+## ðŸ“– Overview
 
 The **Hybrid AI Router** is designed to maximize cost-efficiency and performance by intelligently delegating tasks. It uses a semantic classifier to understand the complexity of a user prompt and routes it to the most appropriate "tier" of intelligence.
 
@@ -23,7 +23,7 @@ We use **Vector Search (Cosine Similarity)** against "Anchor Vectors" to determi
 
 ---
 
-## 🏗️ Architecture
+## ðŸ—ï¸ Architecture
 
 ```mermaid
 graph TD
@@ -48,7 +48,7 @@ graph TD
 
 ---
 
-## 🚀 Key Features
+## ðŸš€ Key Features
 
 - **Semantic Routing**: Real-time vector embedding analysis using `nomic-embed-text`.
 - **Circuit Breaker Pattern**: Graceful fallback logic ensures 100% availability even if cloud APIs or local services fail.
@@ -58,7 +58,7 @@ graph TD
 
 ---
 
-## 🛠️ Tech Stack
+## ðŸ› ï¸ Tech Stack
 
 - **Core**: Python 3.10+
 - **Orchestration**: Docker & Docker Compose
@@ -69,7 +69,7 @@ graph TD
 
 ---
 
-## 🚦 Getting Started
+## ðŸš¦ Getting Started
 
 ### Prerequisites
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
@@ -98,17 +98,33 @@ graph TD
 
 ---
 
-## 🛡️ Security & Privacy
+## ðŸ›¡ï¸ Security & Privacy
 
 - **Secrets Management**: Sensitive keys are loaded from ignored files or environment variables.
 - **Data Sovereignty**: Simple queries never leave your local machine, keeping your most personal data private.
 
 ---
 
-## 📄 License
+## ðŸ“„ License
 
 Distributed under the MIT License. See `LICENSE` for more information.
 
 ---
 
-**Built with ❤️ for the future of Local-First AI.**
+**Built with â¤ï¸ for the future of Local-First AI.**
+
+## 🧱 System Constraints & Governance
+
+To ensure production stability and enterprise-grade reliability, this system operates under a strict set of architectural primitives:
+
+### 1. Data Contract (The Input Boundary)
+The system exposes an **OpenAI-compatible /v1/chat/completions** endpoint. All incoming requests are validated against the following primitives:
+*   **Payload Schema**: Must be valid JSON with a messages list. Malformed payloads or unsupported types trigger a 422 Unprocessable Entity response, ensuring the core routing engine never experiences an unhandled 500 error.
+*   **Multimodal Logic**: Supports base64-encoded images via the image_url standard. If an image is detected, the system immediately executes a **Vision Tier Bypass**, delegating to Gemini Flash to avoid vector-embedding overhead.
+*   **Hard Bottleneck**: Input is capped at **8,192 tokens** (constrained by the 
+omic-embed-text vectorizer). Large documents are intelligently chunked via the RAG pipeline; raw prompt inputs exceeding this limit are truncated to preserve system idempotency.
+
+### 2. Governance & Truth Protocol
+*   **Hallucination Guardrails**: Every routed response is logged and audited by the **LLM-as-a-Judge (Gemma 2 9B)** framework. Any response scoring below 3.0 on accuracy or helpfulness is flagged for manual review and threshold recalibration.
+*   **Cost-Zero Resilience**: Identical or semantically similar queries (>95% match) are intercepted by the **ChromaDB Semantic Cache**. This guarantees O(1) sub-100ms responses for repeated queries, protecting both cloud API quotas and local GPU compute.
+*   **Failure Fallback**: In the event of a Cloud API 429 Rate Limit or 503 Unavailable, the system follows a deterministic fallback chain: **Tier 2 (Pro) → Tier 1 (Flash) → Tier 0 (Local)**.

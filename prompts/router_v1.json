@@ -1,0 +1,30 @@
+{
+    "version":  "1.0",
+    "anchors":  {
+                    "TIER_2_PRO":  [
+                                       "Design a scalable microservice architecture for a high-traffic e-commerce platform.",
+                                       "Refactor this legacy monolith into a modern serverless application.",
+                                       "Analyze the time and space complexity of this distributed algorithm.",
+                                       "What are the trade-offs between eventual consistency and strong consistency in this database schema?",
+                                       "Create a comprehensive production deployment plan and CI/CD pipeline strategy."
+                                   ],
+                    "TIER_1_FLASH":  [
+                                         "Write a Python script to parse this JSON file and extract the email addresses.",
+                                         "How do I fix this React useEffect hook infinite loop error?",
+                                         "Create a Dockerfile for a Node.js Express application.",
+                                         "Write a SQL query to join the users table with the orders table.",
+                                         "Explain how this regular expression works."
+                                     ],
+                    "TIER_0_LOCAL":  [
+                                         "Hello, how are you today?",
+                                         "What is the capital of France?",
+                                         "Write a short, funny poem about a cat.",
+                                         "Summarize this short paragraph.",
+                                         "Who was the 16th president of the United States?"
+                                     ]
+                },
+    "thresholds":  {
+                       "TIER_1_FLASH":  0.6,
+                       "TIER_2_PRO":  0.65
+                   }
+}
