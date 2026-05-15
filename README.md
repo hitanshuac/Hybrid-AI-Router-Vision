@@ -54,7 +54,7 @@ Visit **[http://localhost:8000/dashboard](http://localhost:8000/dashboard)** to 
 ---
 
 ## 🔍 Project Forensic Audit
-This repository maintains a **[RETROSPECTIVE.md](RETROSPECTIVE.md)**—a "Hard Memory" log of every critical failure, its resolution, and the lessons learned. We treat complexity as debt and every failure as a protocol update.
+This repository maintains a **[RETROSPECTIVE.md](https://github.com/hitanshuac/hybrid-ai-router/blob/bff2c32061eba350840232ee22060964bf50b649/retrospective.md)**—a "Hard Memory" log of every critical failure, its resolution, and the lessons learned. We treat complexity as debt and every failure as a protocol update.
 
 ---
 
