@@ -39,6 +39,8 @@ Add your API keys to the `secrets/` directory:
 ### 3. Verify Dashboard
 Visit **[http://localhost:8000/dashboard](http://localhost:8000/dashboard)** to monitor active key pools and system health.
 
+![LLM Live Dashboard](docs/assets/LLM-live-dashboard.png)
+
 ---
 
 ## 🧠 SRE Guardrails & Data Integrity
