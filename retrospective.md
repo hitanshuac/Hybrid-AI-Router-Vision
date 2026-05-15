@@ -28,3 +28,50 @@ This document logs every critical failure, its resolution, and its eventual outc
 1.  **Complexity is a Debt**: Every "Smart" feature (RAG, Semantic Router) adds a failure point. In high-pressure engineering, **Cascading Fallbacks** beat **Complex Classification**.
 2.  **Environment is Fragile**: Git commands can wipe logic faster than you can write it. The `start_all.bat` and `retrospective.md` are the ONLY permanent anchors.
 3.  **Vendor Lock-in is Real**: AWS and Gemini can block you instantly. A multi-provider, multi-key rotational pool is the only way to guarantee 99.9% uptime on free tiers.
+
+---
+
+## 📜 Archived: The "Battle for Stability" (30+ Errors)
+
+We have navigated through a dense minefield of infrastructure and API failures. Below is the list of the last 30 major errors and the "surgeries" performed to fix them.
+
+### 🌩️ Cloud & Provider Failures (The "429/404" Cycle)
+1. **Google 429 (Rate Limit)**: Gemini Flash hitting free-tier limits.
+   - **FIX**: Implemented a **10-minute Circuit Breaker** and automatic failover.
+2. **NVIDIA 404 (Model Not Found)**: Incorrect model identifiers for the new Llama 3.1 series.
+   - **FIX**: Ran diagnostic scripts to verify the specific Meta IDs and updated `config.py`.
+3. **NVIDIA API Timeout (30s)**: Free-tier endpoints becoming saturated and timing out.
+   - **FIX**: Promoted **AWS Bedrock** to the Primary reasoning tier to bypass slow endpoints.
+4. **Bedrock "Malformed Request"**: Older `invoke_model` payloads failing on Claude 3.
+   - **FIX**: Migrated the entire cloud client to the official **Amazon Bedrock Converse API**.
+5. **Gemini Truncation**: Responses cutting off mid-sentence.
+   - **FIX**: Added explicit `generationConfig` with `maxOutputTokens: 4096`.
+6. **Anthropic 401 (Invalid Key)**: Key missing or improperly loaded from secrets.
+   - **FIX**: Standardized the `secrets/` loading logic in `config.py`.
+
+### 🏠 Local & Infrastructure Failures (The "500/Memory" Cycle)
+7. **Ollama 500 (Internal Server Error)**: Local embeddings failing due to memory pressure.
+   - **FIX**: Fully decommissioned local embeddings; migrated to **Google Cloud Embeddings**.
+8. **Local Latency (25s Response)**: Gemma 2 taking too long to generate text.
+   - **FIX**: **Decommissioned all Local LLMs**; moved to a Pure Cloud architecture for speed.
+9. **Ollama 404 (Model Not Found)**: Moondream or Gemma not being pulled in the background.
+   - **FIX**: Added startup checks that verify model presence before booting the server.
+10. **Local Truncation (128 Tokens)**: Ollama defaulting to short answers.
+    - **FIX**: Manually set `num_predict: 4096` in the request payload.
+
+### 🧠 Logic & Architecture Failures (The "Blind Router" Cycle)
+11. **Semantic Cache Poisoning**: Old, short answers being served from memory.
+    - **FIX**: Successive migrations from `v1` ➔ `v2` ➔ `v3` ➔ **`v4`** of the ChromaDB database.
+12. **Blind Routing**: Router defaulting to "General" when embeddings failed.
+    - **FIX**: Switched to **Google Embeddings** to ensure the router's "brain" is always online.
+13. **Stateless Follow-ups**: "I don't know" answers because the model forgot history.
+    - **FIX**: Increased history window to **5 messages** and added `Domain Persistence` logic.
+14. **SyntaxError (f-string backslash)**: Code crashing on restart due to Python 3.10 limitations.
+    - **FIX**: Refactored debug logging to move logic outside of f-string curly braces.
+15. **Git Merge Conflicts**: Conflict markers (`<<<<<<<`) left in `router.py`.
+    - **FIX**: Manually cleaned the source code to restore a clean production state.
+
+### 📊 Current Status
+The "errors" you see in the logs now are **External Outages** (Google 429s or NVIDIA Timeouts). Your code is now doing exactly what it was designed to do: **Survive them.**
+
+When you see a log like `WARNING | router | Gemini failed... trying NVIDIA...`, that is **SUCCESS**. It means your code just prevented a total system crash.

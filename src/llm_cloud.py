@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 import requests
 from tenacity import (
@@ -9,7 +10,8 @@ from tenacity import (
 )
 from src.config import (
     GROQ_API_KEYS, OPENROUTER_API_KEYS, NVIDIA_API_KEYS,
-    PRIMARY_CLOUD_MODEL, SECONDARY_CLOUD_MODEL, SAFETY_NET_MODEL
+    PRIMARY_CLOUD_MODEL, SECONDARY_CLOUD_MODEL, SAFETY_NET_MODEL,
+    LOCAL_MODEL_PRIMARY, OLLAMA_HOST
 )
 
 logger = logging.getLogger("cloud")
@@ -23,7 +25,7 @@ class CloudTransientError(Exception): pass
 # ============================================================
 def query_cloud(prompt):
     """
-    Tries providers in sequence: Groq -> OpenRouter -> NVIDIA.
+    Tries providers in sequence: Groq -> OpenRouter -> NVIDIA -> Ollama.
     Stops at the first successful response.
     """
     
@@ -69,4 +71,16 @@ def query_cloud(prompt):
                     return resp.json()['choices'][0]['message']['content']
             except: continue
 
-    raise CloudExhaustedException("All cloud providers failed.")
+    # 4. OLLAMA (Offline Safety Net — Local GPU)
+    try:
+        resp = requests.post(
+            f"{OLLAMA_HOST}/api/chat",
+            json={"model": LOCAL_MODEL_PRIMARY, "messages": [{"role": "user", "content": prompt}], "stream": False},
+            timeout=60
+        )
+        if resp.status_code == 200:
+            return resp.json()['message']['content']
+    except:
+        pass
+
+    raise CloudExhaustedException("All providers failed (cloud + local).")

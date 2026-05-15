@@ -36,3 +36,14 @@ PRIMARY_CLOUD_MODEL = "llama-3.3-70b-versatile"
 SECONDARY_CLOUD_MODEL = "google/gemma-4-31b-it:free"
 SAFETY_NET_MODEL = "meta/llama-3.1-8b-instruct"
 LOCAL_MODEL_PRIMARY = "gemma2:9b"
+
+# Ollama (Local) Configuration
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+LOCAL_TIMEOUT = (5, 120)  # (connect_timeout, read_timeout) in seconds
+MAX_LOCAL_RETRIES = 3
+
+# Telegram Bot
+TELEGRAM_BOT_TOKEN = ""
+_telegram_keys = get_secrets_list("telegram_bot_token")
+if _telegram_keys:
+    TELEGRAM_BOT_TOKEN = _telegram_keys[0]

@@ -1,53 +1,58 @@
-# 🚀 Hybrid AI Router: Minimalist Cascade (v2.0)
+# 🚀 Hybrid AI Router: Agentic Pipeline (v2.2.0-pipeline)
 
-A high-performance, zero-complexity API Gateway that maximizes cloud resilience using a multi-provider waterfall and rotational key pool.
+A production-grade, SRE-focused API Gateway and Data Engineering pipeline. This system maximizes cloud resilience through a multi-provider waterfall cascade and maintains absolute data integrity using an autonomous Agentic Operating System.
 
 ---
 
-## 🛠️ Minimalist Architecture
-This system is designed for **Bulletproof Reliability**. It eliminates complex semantic routing in favor of a robust failover cascade:
+## 🛠️ System Architecture
+Built for **Bulletproof Reliability**, the system decouples complex logic from core routing and enforces strict SRE guardrails via the **Agentic Control Plane**.
 
-**Waterfall Path:**
+![Architecture Diagram](docs/assets/architecture_diagram_v2_2_0.png)
+
+### 1. The Waterfall Cascade
+Ensures 99.9% uptime by automatically pivoting between providers:
 1.  **Groq (Primary)**: Ultra-fast inference (`llama-3.3-70b`).
 2.  **OpenRouter (Fallback)**: Diverse provider safety net (`gemma-4-free`).
 3.  **NVIDIA NIM (Safety Net)**: High-reliability fallback (`llama-3.1-8b`).
 4.  **Ollama (Offline)**: Local private execution (`gemma2:9b`).
 
+### 2. The Agentic Control Plane
+The `.agents/` directory functions as the system's "Brain," governing data engineering and pipeline operations:
+- **Autonomous Rules**: Enforces **DuckDB Idempotency** (no duplicate rows) and **Pydantic Fault Tolerance** (quarantining bad data to `.parquet` instead of crashing).
+- **Specialized Skills**: The `pipeline-architect` (minimalism) and `duckdb-optimizer` (WAL + memory safety) ensure the system remains lean and stable.
+- **Resilient Workflows**: Standardized paths for `daily-ingestion` and emergency `error-recovery` circuit breakers.
+
 ---
 
 ## 🚀 First-Run Setup (The "Login")
 
-To get the system running, follow these steps:
-
 ### 1. Configure Secrets
-The system uses a **Rotational Key Pool**. Add your API keys to the `secrets/` directory:
-- `secrets/groq_api_key_1.txt` (and `_2.txt`, `_3.txt` for rotation)
+Add your API keys to the `secrets/` directory:
+- `secrets/groq_api_key_1.txt`
 - `secrets/openrouter_api_key_1.txt`
 - `secrets/nvidia_api_key_1.txt`
 
 ### 2. Launch System
-Double-click:
 - **`start_all.bat`**: Boots the Production Server and Dashboard.
+- **`src/daily_ingestion.py`**: Triggers the agentic data pipeline.
 
 ### 3. Verify Dashboard
-Visit **[http://localhost:8000/dashboard](http://localhost:8000/dashboard)** in your browser to see your active key pools and system status.
+Visit **[http://localhost:8000/dashboard](http://localhost:8000/dashboard)** to monitor active key pools and system health.
 
 ---
 
-## 🔌 Integration (Connect Your IDE/WebUI)
+## 🧠 SRE Guardrails & Data Integrity
+- **Idempotent Ingestion**: All data writes use `INSERT OR REPLACE` to ensure retries never result in duplicate metrics.
+- **Automatic Quarantine**: Malformed data is caught by Pydantic and isolated to `data/quarantine_*.parquet` for manual audit.
+- **Memory Safety**: DuckDB is strictly capped at 2GB RAM with Write-Ahead Logging (WAL) enabled to prevent OOM crashes and data loss.
+- **Circuit Breakers**: The system halts and checkpoints database state after 3 consecutive 429/503 errors.
 
-The Router exposes an **OpenAI-compatible API**. You can use it as a custom provider in:
-
-- **Open WebUI**: Set Base URL to `http://localhost:8000/v1`
-- **Cursor / VSCode**: Use as an OpenAI API provider with the above URL.
-- **Python/JS**: Point your OpenAI client to `http://localhost:8000/v1`
+![Terminal Output Ingestion](docs/assets/terminal_output_ingestion.png)
 
 ---
 
-## 🧠 Governance & Failover
-- **Key Rotation**: Automatically cycles through all keys in `secrets/` to maximize bandwidth and bypass rate limits.
-- **Waterfall Resilience**: If Groq fails (429/500), the system instantly pivots to OpenRouter, then NVIDIA, then Local.
-- **Zero Cost**: Pre-configured to use **Strictly FREE** models by default.
+## 🔍 Project Forensic Audit
+This repository maintains a **[RETROSPECTIVE.md](RETROSPECTIVE.md)**—a "Hard Memory" log of every critical failure, its resolution, and the lessons learned. We treat complexity as debt and every failure as a protocol update.
 
 ---
 

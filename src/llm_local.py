@@ -23,7 +23,6 @@ TROUBLESHOOTING:
 import logging
 import time
 import requests
-from src.observability import trace_span
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -60,7 +59,6 @@ class LocalTransientError(Exception):
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-@trace_span("ollama_generate")
 def _query_local_with_retry(prompt, model):
     """
     Internal function that makes the actual Ollama API call.
