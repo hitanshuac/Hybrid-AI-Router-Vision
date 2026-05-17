@@ -1,0 +1,32 @@
+name: Render Mermaid Architecture
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'README.md'
+      - '.github/workflows/update_architecture.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Render Mermaid to PNG
+        uses: mermaid-js/mermaid-cli@v3.0.0
+        with:
+          input: README.md
+          output: docs/assets/system_architecture.png
+
+      - name: Commit and Push Updated Architecture Image
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add docs/assets/system_architecture.png
+          git diff --cached --quiet || (git commit -m "docs: auto-generate architecture diagram from mermaid" && git push)

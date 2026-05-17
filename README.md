@@ -33,46 +33,7 @@ Built with SRE principles at its core, this system is a testament to resilience,
 
 At its heart, the system operates as a dual-engine architecture, each optimized for its specific domain while sharing a common, resilient infrastructure.
 
-```mermaid
-graph TD
-    A[Client Request] --> B{API Gateway src/server.py};
-    
-    %% Gateway Flow
-    B -- "/v1/chat/completions" --> C{Router Logic src/router.py};
-    C -- Text Payload --> D[Text Cascade src/llm_cloud.py];
-    C -- Image Payload --> E[Vision Cascade src/llm_cloud.py];
-    
-    D --> F[Groq / OpenRouter / NVIDIA NIM / Gemini / Ollama];
-    E --> G[Groq-Vision / OpenRouter-Vision / NVIDIA-Vision / Gemini-Vision / Ollama-Vision];
-    
-    %% Invoice Flow
-    B -- "/api/v1/pipeline/ingest" --> H[Invoice Ingest Engine];
-    H --> I[Stage 1: Structured OCR src/vision_client.py];
-    I -- Gemini 2.5 Flash --> J[Stage 2: Deterministic Arithmetic Check src/anomaly.py];
-    J -- Pure Python Logic --> K[Stage 3: Dupe & History Audit src/server.py];
-    K -- DuckDB Ledger Query --> L[Stage 4: Async Handoff & Telemetry];
-    L -- Starlette Threadpool --> M[(DuckDB Telemetry & Ledger)];
-    
-    %% Subgraphs for Services
-    subgraph Core Services
-        C -- Context Grounding v2.3.0 --> R[System Prompt Injection];
-        C -- Context Compaction v2.4.0 --> S[Sliding Window Compaction];
-        C -- Token Estimation --> U[Dynamic +1024 Token Proxy];
-    end
-    
-    subgraph SRE Guardrails
-        X[Secrets Manager secrets/*.txt]
-        Y[RateLimitManager Circuit Breaker]
-        Z[Event Loop Guarding Background tasks]
-    end
-    
-    R --> D; R --> E;
-    S --> D; S --> E;
-    U --> D; U --> E;
-    X --> F; X --> G; X --> I;
-    Y --> F; Y --> G;
-    Z --> L; Z --> M;
-```
+![System Architecture](docs/assets/system_architecture.png)
 
 ### 1. 🌐 Gateway Engine (`POST /v1/chat/completions`)
 
@@ -166,3 +127,50 @@ The server will now be accessible at `http://localhost:8080`. The interactive Sw
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🗺️ System Flowchart (Mermaid Source)
+
+The following raw Mermaid diagram governs the visual representation of our gateway and invoice pipeline. It is automatically parsed and compiled by our automation workflows whenever a new version is pushed to GitHub.
+
+```mermaid
+graph TD
+    A[Client Request] --> B{API Gateway src/server.py};
+    
+    %% Gateway Flow
+    B -- "/v1/chat/completions" --> C{Router Logic src/router.py};
+    C -- Text Payload --> D[Text Cascade src/llm_cloud.py];
+    C -- Image Payload --> E[Vision Cascade src/llm_cloud.py];
+    
+    D --> F[Groq / OpenRouter / NVIDIA NIM / Gemini / Ollama];
+    E --> G[Groq-Vision / OpenRouter-Vision / NVIDIA-Vision / Gemini-Vision / Ollama-Vision];
+    
+    %% Invoice Flow
+    B -- "/api/v1/pipeline/ingest" --> H[Invoice Ingest Engine];
+    H --> I[Stage 1: Structured OCR src/vision_client.py];
+    I -- Gemini 2.5 Flash --> J[Stage 2: Deterministic Arithmetic Check src/anomaly.py];
+    J -- Pure Python Logic --> K[Stage 3: Dupe & History Audit src/server.py];
+    K -- DuckDB Ledger Query --> L[Stage 4: Async Handoff & Telemetry];
+    L -- Starlette Threadpool --> M[(DuckDB Telemetry & Ledger)];
+    
+    %% Subgraphs for Services
+    subgraph Core Services
+        C -- Context Grounding v2.3.0 --> R[System Prompt Injection];
+        C -- Context Compaction v2.4.0 --> S[Sliding Window Compaction];
+        C -- Token Estimation --> U[Dynamic +1024 Token Proxy];
+    end
+    
+    subgraph SRE Guardrails
+        X[Secrets Manager secrets/*.txt]
+        Y[RateLimitManager Circuit Breaker]
+        Z[Event Loop Guarding Background tasks]
+    end
+    
+    R --> D; R --> E;
+    S --> D; S --> E;
+    U --> D; U --> E;
+    X --> F; X --> G; X --> I;
+    Y --> F; Y --> G;
+    Z --> L; Z --> M;
+```
