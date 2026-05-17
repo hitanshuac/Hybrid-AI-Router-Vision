@@ -443,8 +443,8 @@ async def get_dashboard():
             <footer>End-to-End Resilience &bull; Port 8000 &bull; Auto-refreshes every 30s</footer>
         </div>
         <script>
-            async function updateCompactionMetrics() {
-                try {
+            async function updateCompactionMetrics() {{
+                try {{
                     const response = await fetch('/api/v1/metrics/efficiency', {{
                         headers: {{ 'Accept': 'application/json' }}
                     }});
@@ -469,9 +469,9 @@ async def get_dashboard():
                         }}
                     }}
                 }} catch (err) {{
-                    console.error('Failed to fetch compaction metrics:', err);
+                    console.error('Failed to fetch metrics:', err);
                 }}
-            }
+            }}
             // Poll every 10 seconds
             setInterval(updateCompactionMetrics, 10000);
             updateCompactionMetrics();
