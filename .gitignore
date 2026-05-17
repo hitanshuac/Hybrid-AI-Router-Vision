@@ -45,3 +45,7 @@ Thumbs.db
 
 # Vector Database
 chroma_db/
+
+# Antigravity Multi-Agent Memory storage
+.antigravity/
+agents/
