@@ -472,8 +472,6 @@ def get_dashboard():
                     console.error('Failed to fetch metrics:', err);
                 }}
             }}
-            // Poll every 10 seconds
-            setInterval(updateCompactionMetrics, 10000);
             updateCompactionMetrics();
         </script>
     </body>
