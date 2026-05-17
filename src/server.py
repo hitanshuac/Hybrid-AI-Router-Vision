@@ -89,6 +89,36 @@ async def startup_event():
 async def get_dashboard():
     from src.config import GROQ_API_KEYS, OPENROUTER_API_KEYS, NVIDIA_API_KEYS
 
+    # Fetch initial context compaction telemetry from DuckDB
+    tokens_saved = 0
+    compaction_ratio = 0.0
+    active_tier = "N/A"
+    try:
+        con = duckdb.connect(_DB_PATH, read_only=True)
+        row = con.execute("""
+            SELECT 
+                COALESCE(SUM(tokens_saved), 0) AS total_saved,
+                COALESCE(ROUND(AVG(savings_pct), 1), 0.0) AS avg_ratio
+            FROM compaction_log
+        """).fetchone()
+        
+        last_tier_row = con.execute("""
+            SELECT tier FROM compaction_log ORDER BY id DESC LIMIT 1
+        """).fetchone()
+        
+        con.close()
+        if row:
+            tokens_saved = int(row[0])
+            compaction_ratio = float(row[1])
+        if last_tier_row:
+            active_tier = last_tier_row[0]
+    except Exception as e:
+        logger.warning(f"[TELEMETRY] Failed to fetch dashboard telemetry: {e}")
+
+    tokens_saved_str = f"{tokens_saved:,}"
+    compaction_ratio_str = f"{compaction_ratio:.1f}%"
+
+
     # Build provider status cards
     provider_cards = ""
     for pid, ps in provider_statuses.items():
@@ -352,7 +382,7 @@ async def get_dashboard():
             <div class="header">
                 <div class="status-pill"><span class="dot"></span> System Active</div>
                 <h1>Hybrid AI Router</h1>
-                <p class="subtitle">Minimalist Waterfall Engine v2.0</p>
+                <p class="subtitle">Minimalist Waterfall Engine v2.4.0</p>
             </div>
 
             <div class="refresh-bar"></div>
@@ -370,6 +400,22 @@ async def get_dashboard():
                 <div class="stat-card">
                     <div class="stat-val">{stats.last_latency:.1f}s</div>
                     <div class="stat-label">Last Latency</div>
+                </div>
+            </div>
+
+            <div class="section-title">Compaction & Telemetry</div>
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div id="metric-tokens-saved" class="stat-val">{tokens_saved_str}</div>
+                    <div class="stat-label">Tokens Saved</div>
+                </div>
+                <div class="stat-card">
+                    <div id="metric-compaction-ratio" class="stat-val">{compaction_ratio_str}</div>
+                    <div class="stat-label">Compaction Ratio</div>
+                </div>
+                <div class="stat-card">
+                    <div id="metric-active-tier" class="stat-val" style="color: var(--accent);">{active_tier}</div>
+                    <div class="stat-label">Active Tier</div>
                 </div>
             </div>
 
@@ -396,6 +442,40 @@ async def get_dashboard():
 
             <footer>End-to-End Resilience &bull; Port 8000 &bull; Auto-refreshes every 30s</footer>
         </div>
+        <script>
+            async function updateCompactionMetrics() {
+                try {
+                    const response = await fetch('/api/v1/metrics/efficiency', {{
+                        headers: {{ 'Accept': 'application/json' }}
+                    }});
+                    if (response.ok) {{
+                        const data = await response.json();
+                        const summary = data.summary;
+                        const recent = data.recent;
+                        
+                        // Format tokens with commas
+                        const totalSaved = summary.total_tokens_saved;
+                        document.getElementById('metric-tokens-saved').innerText = Number(totalSaved).toLocaleString();
+                        
+                        // Format compaction ratio
+                        const avgRatio = summary.avg_savings_pct;
+                        document.getElementById('metric-compaction-ratio').innerText = avgRatio.toFixed(1) + '%';
+                        
+                        // Set active tier from the most recent record
+                        if (recent && recent.length > 0) {{
+                            document.getElementById('metric-active-tier').innerText = recent[0].tier;
+                        }} else {{
+                            document.getElementById('metric-active-tier').innerText = 'N/A';
+                        }}
+                    }}
+                }} catch (err) {{
+                    console.error('Failed to fetch compaction metrics:', err);
+                }}
+            }
+            // Poll every 10 seconds
+            setInterval(updateCompactionMetrics, 10000);
+            updateCompactionMetrics();
+        </script>
     </body>
     </html>
     """
