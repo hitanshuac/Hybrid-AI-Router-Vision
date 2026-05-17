@@ -86,7 +86,7 @@ async def startup_event():
 # --- PREMIUM DASHBOARD ---
 @app.get("/", response_class=HTMLResponse)
 @app.get("/dashboard", response_class=HTMLResponse)
-async def get_dashboard():
+def get_dashboard():
     from src.config import GROQ_API_KEYS, OPENROUTER_API_KEYS, NVIDIA_API_KEYS
 
     # Fetch initial context compaction telemetry from DuckDB
@@ -611,7 +611,7 @@ async def health_providers():
 
 
 @app.get("/api/v1/metrics/efficiency")
-async def get_efficiency_metrics(request: Request):
+def get_efficiency_metrics(request: Request):
     """Compaction telemetry — aggregate stats and last 10 records from DuckDB."""
     if "text/html" in request.headers.get("accept", ""):
         return RedirectResponse(url="/dashboard")
