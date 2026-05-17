@@ -8,31 +8,6 @@ A high-performance, SRE-grade API Gateway and Data Engineering pipeline. This sy
 
 Built for **Bulletproof Reliability**, the system enforces strict SRE guardrails via the **Agentic Control Plane** and handles payloads through an optimized, zero-overhead execution pipeline.
 
-```mermaid
-graph TD
-    Client[Client Request] --> Router[src/router.py: classify_and_route]
-    
-    subgraph Pipeline [5-Step Compaction Pipeline]
-        Router --> Step1[1. Deep Copy]
-        Step1 --> Step2[2. Ephemeral Grounding]
-        Step2 --> Step3[3. Boilerplate Prefix Stripping]
-        Step3 --> Step4[4. Sliding Window Slicing]
-        Step4 --> Step5[5. Admission Control Heuristic]
-    end
-    
-    Step5 --> Groq{Groq Tier 1}
-    Groq -- Success --> Return[Client Response]
-    Groq -- Fail / Bypass --> OR{OpenRouter Tier 2}
-    OR -- Success --> Return
-    OR -- Fail / Bypass --> NV{NVIDIA NIM Tier 3}
-    NV -- Success --> Return
-    NV -- Fail / Bypass --> Gemini{Gemini Flash Tier 4}
-    Gemini -- Success --> Return
-    Gemini -- Fail / Bypass --> Ollama[Local Ollama Tier 5]
-    Ollama --> Return
-    
-    Return --> Telemetry[DuckDB Telemetry Engine]
-```
 
 ![Architecture Diagram](docs/assets/architecture_diagram_v2_2_0.png)
 
@@ -115,3 +90,34 @@ This repository maintains an active **[RETROSPECTIVE.md](retrospective.md)**—a
 ---
 
 **Built for Engineering Resilience. No Complexity. Pure Telemetry. Maximum Uptime.**
+
+---
+
+## 🗺️ System Interaction & Flow
+
+```mermaid
+graph TD
+    Client[Client Request] --> Router[src/router.py: classify_and_route]
+    
+    subgraph Pipeline [5-Step Compaction Pipeline]
+        Router --> Step1[1. Deep Copy]
+        Step1 --> Step2[2. Ephemeral Grounding]
+        Step2 --> Step3[3. Boilerplate Prefix Stripping]
+        Step3 --> Step4[4. Sliding Window Slicing]
+        Step4 --> Step5[5. Admission Control Heuristic]
+    end
+    
+    Step5 --> Groq{Groq Tier 1}
+    Groq -- Success --> Return[Client Response]
+    Groq -- Fail / Bypass --> OR{OpenRouter Tier 2}
+    OR -- Success --> Return
+    OR -- Fail / Bypass --> NV{NVIDIA NIM Tier 3}
+    NV -- Success --> Return
+    NV -- Fail / Bypass --> Gemini{Gemini Flash Tier 4}
+    Gemini -- Success --> Return
+    Gemini -- Fail / Bypass --> Ollama[Local Ollama Tier 5]
+    Ollama --> Return
+    
+    Return --> Telemetry[DuckDB Telemetry Engine]
+```
+
