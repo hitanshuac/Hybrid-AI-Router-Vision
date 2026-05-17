@@ -26,6 +26,9 @@ This document logs every critical failure, its resolution, and its eventual outc
 | 18 | 2026-05-17 | **Context Drift (Ungrounded Models)** | Implemented Ephemeral Context Grounding v2.3.0 — system prompt injected at index 0 of every outbound payload | ✅ **Stayed** | Active |
 | 19 | 2026-05-17 | **Token Wastage (Uncompacted Payloads)** | Implemented Context Compaction v2.4.0 — boilerplate stripping, 10-msg sliding window, DuckDB telemetry tracking | ✅ **Stayed** | Active |
 | 20 | 2026-05-17 | **Event Loop Blocking** | Converted `/dashboard` and `/api/v1/metrics/efficiency` endpoints from `async def` to standard `def` to offload synchronous file I/O to Starlette's background threadpool | ✅ **Stayed** | Zero-latency LLM routing restored, 9/9 baseline tests passed |
+| 21 | 2026-05-17 | **Gemini SDK 404 Path Failure** | Stripped `models/` prefix namespace inside the constructor, passing flat model tracking strings. | ✅ **Stayed** | Stable Execution |
+| 22 | 2026-05-17 | **Base64 Token Inflation Bypass** | Decoupled Base64 character loops from calculation engine and applied a fixed `+1024` token weight proxy. | ✅ **Stayed** | Circuit breaker protected |
+| 23 | 2026-05-17 | **Silent Chat Array Flattening** | Intercepted client multi-modal arrays inside `server.py` to forward native structures to OpenAI/Groq standards. | ✅ **Stayed** | Multi-Modal Capable |
 
 ## 🧠 Key Learnings
 1.  **Complexity is a Debt**: Every "Smart" feature (RAG, Semantic Router) adds a failure point. In high-pressure engineering, **Cascading Fallbacks** beat **Complex Classification**.

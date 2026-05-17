@@ -1,55 +1,29 @@
-# 🚀 Hybrid AI Router: Agentic Pipeline (v2.4.1)
+# 🚀 Hybrid AI Router: Multi-Modal Vision Core (v1.0.0 Stable)
 
-A high-performance, SRE-grade API Gateway and Data Engineering pipeline. This system maximizes cloud resilience through a multi-provider waterfall cascade, enforces strict behavioral personas, and maintains absolute data integrity and token efficiency via a dedicated **Telemetry & Compaction Plane**.
-
----
-
-## 🛠️ System Architecture
-
-Built for **Bulletproof Reliability**, the system enforces strict SRE guardrails via the **Agentic Control Plane** and handles payloads through an optimized, zero-overhead execution pipeline.
-
-
-![Architecture Diagram](docs/assets/architecture_diagram_v2_4_1.png)
-
-
-### The 5-Step Compaction & Routing Sequence
-Every request array flowing through the gateway is processed through five immutable stages to eliminate context drift and minimize token wastage:
-
-1. **Deep Copy**: Deep copies incoming message payloads, ensuring caller data is never mutated.
-2. **Grounding**: Ephemerally injects the canonical `SYSTEM_GROUNDING_PROMPT` at index 0 of every outbound payload.
-3. **Prefix Stripping**: Scans and strips 11 common AI conversational filler prefixes (e.g., `"Sure! "`, `"Great question! "`) from assistant history messages.
-4. **Sliding Window**: Enforces a strict **10-message sliding window cap** (retaining index 0's grounding prompt and the 9 most recent turns) to prevent payload bloat.
-5. **Admission Control**: Evaluates the payload using a pre-flight heuristic (`len(prompt) // 4`). If the estimated tokens exceed a provider's limit, the model is instantly bypassed locally, preventing network latency and `400 Bad Request` exceptions.
+A low-overhead API Gateway and Automated Inspection pipeline engineered for absolute cloud resilience. This service runs a dual-mode engine: high-throughput $O(1)$ text/multimodal routing cascades alongside a deterministic data pipeline optimized for sub-second document analysis.
 
 ---
 
-## 📊 Real-Time SRE Telemetry Mandate
+## 🛠️ Unified System Topology
 
-To guarantee operational transparency and prevent architectural guesswork, the router enforces a strict **Telemetry Mandate** running on the request hot path.
+1. **Gateway Engine (`POST /v1/chat/completions`)**
+   - Implements an adaptive multi-modal sniffer that catches Base64 input matrices.
+   - Routes text requests natively to Groq tiers while scaling image payloads across an automated fallback cluster:
+     `Groq Vision` ➔ `OpenRouter (Gemini 1.5)` ➔ `NVIDIA NIM` ➔ `Gemini API (Native)` ➔ `Local Ollama`
+   - Pre-flight admission controls run strict fallback circuit breaks based on a `+1024` token vision weight protection matrix.
 
-### 1. DuckDB Telemetry Ingestion
-Every completion logs comprehensive metrics directly to a local high-performance DuckDB instance (`data/pipeline_metrics.db`):
-- **Token Efficiency tracking**: Evaluates `raw_tokens`, `compact_tokens`, total `tokens_saved`, and `savings_pct`.
-- **Structural offsets**: Logs `messages_dropped` and `prefixes_stripped`.
-- **System latency**: Captures request `latency_sec` and the successfully resolving cascade `tier`.
-- **DuckDB Optimizer configuration**: The DB connection runs with Write-Ahead Logging (WAL) enabled and is strictly capped at a `256MB` RAM limit (`PRAGMA memory_limit='256MB'`) to guarantee memory safety.
+2. **Challan Anomaly Detection Engine (`POST /api/v1/pipeline/ingest`)**
+   - High-fidelity structured JSON matching using Gemini 1.5 Flash at the edge.
+   - Pushes raw extractions into a completely local, deterministic Python arithmetic audit loop to catch item skews, calculation drift, and ledger collisions.
+   - Operates with zero main-thread loop blocking via Starlette background worker threads.
 
-### 2. Live Efficiency Endpoint
-The system exposes real-time telemetry metrics via:
-* **`GET /api/v1/metrics/efficiency`**: Returns aggregated pipeline statistics (total savings, average savings %, average latency) and a log of the last 10 requests.
+---
 
-### 3. Fail-Safe Quarantining Protocols
-In accordance with our strict data engineering standards:
-- **Non-Blocking Validation**: Pydantic schemas validate all payloads without blockages.
-- **Parquet Quarantine Isolation**: Any corrupted or malformed data that fails schema validation is immediately caught and routed to isolated `data/quarantine_*.parquet` files. This isolates bad records without interrupting active pipeline ingestion or raising uncaught runtime exceptions.
+## 🛡️ SRE Core Governance
 
-![Terminal Output Ingestion](docs/assets/terminal_output_ingestion.png)
-
-### 4. Non-Blocking SRE Threadpool & Content-Negotiation Plane
-To achieve absolute resilience and zero main-thread freezing:
-- **FastAPI Threadpool Routing**: All telemetry-producing endpoints (`/dashboard` and `/api/v1/metrics/efficiency`) are served via standard synchronous `def` handlers. This causes FastAPI to automatically run them on Starlette's background threadpool, offloading synchronous DuckDB file I/O operations from the main ASGI event loop. This guarantees non-blocking execution of the LLM pipeline and completely eliminates connection resets (`WinError 10054`) under high load.
-- **HTTP Content Negotiation**: The `/api/v1/metrics/efficiency` endpoint implements content negotiation. It seamlessly responds with structured compaction JSON to machine clients (`Accept: application/json` or `*/*`), while detecting web browser traffic (`Accept: text/html`) and instantly redirecting users to the visual real-time `/dashboard`.
-
+All agent transformations are strictly bound to our localized workflow rulebooks:
+- **`sql-standards.md`**: Guarantees absolute write idempotency via `INSERT OR REPLACE` tasks.
+- **`data-validation.md`**: Enforces system resilience. Errant formats drop instantly into `data/quarantine_*.parquet` stores without interrupting availability metrics.
 
 ---
 

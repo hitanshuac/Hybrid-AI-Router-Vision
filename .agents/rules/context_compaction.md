@@ -45,3 +45,12 @@ The 5-step sequence within `src/router.py` is:
 - Required fields: `raw_tokens`, `compact_tokens`, `tokens_saved`, `savings_pct`, `messages_dropped`, `prefixes_stripped`, `latency_sec`, `tier`.
 - The DuckDB connection must follow the DuckDB Optimizer skill directives: WAL mode enabled, memory capped at 256MB.
 - Telemetry writes must be non-blocking to the request path — a failed write must not crash the cascade.
+
+---
+version: 1.0.0 (Vision Core Amendment)
+---
+
+### 7. Multi-Modal Vision Payload Bounding Heuristics
+- **Base64 Character Insulation**: Raw image strings must be isolated and ignored during standard text character length divisions (`len(text) // 4`) to prevent artifact length poisoning.
+- **Vision Token Proxy Penalty**: When an image is identified in the request messages content list, a static weight of **1,024 tokens** must be cleanly added to the calculated text token payload block.
+- **Circuit Breaker Integration**: If the combined (text + proxy vision tokens) count exceeds a destination target model limit (e.g., NVIDIA NIM cap at 4,000 tokens), the router must instantly trigger a `[PRE-FLIGHT BYPASS]` block and forward the payload to a high-capacity tier (e.g., Gemini 2.5 Flash).
