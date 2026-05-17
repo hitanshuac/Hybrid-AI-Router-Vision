@@ -1,0 +1,96 @@
+{
+  "timestamp": "2026-05-17T14:16:05.280829",
+  "summary": {
+    "total_tests": 9,
+    "successful_tests": 9,
+    "failed_tests": 0,
+    "success_rate_pct": 100.0,
+    "average_latency_sec": 2.2733,
+    "total_duration_sec": 20.46
+  },
+  "context_overflow_tests": [
+    {
+      "test_name": "Baseline (100 chars)",
+      "prompt_length_chars": 100,
+      "success": true,
+      "latency_sec": 1.1184,
+      "resolved_tier": "CLOUD_CASCADE",
+      "response_snippet": "Text is all repeating letters....",
+      "error": null
+    },
+    {
+      "test_name": "Medium Prompt (4,000 chars)",
+      "prompt_length_chars": 4000,
+      "success": true,
+      "latency_sec": 2.968,
+      "resolved_tier": "CLOUD_CASCADE",
+      "response_snippet": "The text is excessively long....",
+      "error": null
+    },
+    {
+      "test_name": "Large Prompt (16,000 chars)",
+      "prompt_length_chars": 16000,
+      "success": true,
+      "latency_sec": 4.9165,
+      "resolved_tier": "CLOUD_CASCADE",
+      "response_snippet": "Text consists solely of 'A'....",
+      "error": null
+    },
+    {
+      "test_name": "Massive Prompt (65,000 chars)",
+      "prompt_length_chars": 65000,
+      "success": true,
+      "latency_sec": 9.5485,
+      "resolved_tier": "CLOUD_CASCADE",
+      "response_snippet": "Repeated letter A text....",
+      "error": null
+    }
+  ],
+  "failover_tests": [
+    {
+      "test_name": "Groq Outage -> OpenRouter handles",
+      "scenario": "groq_fail",
+      "success": true,
+      "latency_sec": 0.1018,
+      "resolved_tier": "CLOUD_CASCADE",
+      "response_snippet": "OpenRouter successful response (Simulated)...",
+      "error": null
+    },
+    {
+      "test_name": "Groq + OpenRouter Outage -> NVIDIA NIM handles",
+      "scenario": "groq_openrouter_fail",
+      "success": true,
+      "latency_sec": 0.2004,
+      "resolved_tier": "CLOUD_CASCADE",
+      "response_snippet": "NVIDIA NIM successful response (Simulated)...",
+      "error": null
+    },
+    {
+      "test_name": "Groq + OR + NV Outage -> Gemini Flash handles",
+      "scenario": "groq_or_nv_fail",
+      "success": true,
+      "latency_sec": 0.4011,
+      "resolved_tier": "CLOUD_CASCADE",
+      "response_snippet": "Gemini Flash successful response (Simulated)...",
+      "error": null
+    },
+    {
+      "test_name": "All Cloud Outages -> Local Ollama handles",
+      "scenario": "all_cloud_fail",
+      "success": true,
+      "latency_sec": 0.6021,
+      "resolved_tier": "CLOUD_CASCADE",
+      "response_snippet": "Ollama local GPU successful response (Simulated)...",
+      "error": null
+    },
+    {
+      "test_name": "Total Outage (Cloud + Local) -> Graceful Error",
+      "scenario": "total_failure",
+      "success": true,
+      "latency_sec": 0.6033,
+      "resolved_tier": "ERROR",
+      "response_snippet": "All cloud providers failed. Please check your keys....",
+      "error": null
+    }
+  ]
+}
