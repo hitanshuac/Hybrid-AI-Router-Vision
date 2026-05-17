@@ -19,7 +19,7 @@ logger = logging.getLogger("vision_client")
 # System grounding: ephemerally injected at execution time
 VISION_SYSTEM_PROMPT = (
     "You are the Core Vision Extraction Node for the Hybrid AI Router Pipeline. "
-    "Analyze the provided invoice/challan image and extract all elements with perfect textual fidelity. "
+    "Analyze the provided invoice image and extract all elements with perfect textual fidelity. "
     "Do not perform rounding or compute totals yourself—extract the exact values printed on the paper. "
     "Return a JSON object with keys: invoice_number, vendor_name, date, line_items (array of "
     "{item_code, description, quantity, unit_price, total_price}), tax_amount, grand_total."
@@ -52,7 +52,7 @@ def _sync_extract(base64_data: str, api_key: str) -> dict:
     return extracted
 
 
-async def extract_challan_data(base64_data: str) -> dict:
+async def extract_invoice_data(base64_data: str) -> dict:
     """
     Async entry point. Resolves the Gemini API key from the existing
     secrets key pool (config.py) and offloads the synchronous SDK call

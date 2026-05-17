@@ -35,9 +35,9 @@ To maintain SRE compliance, any new multi-modal endpoint must adhere to the foll
 
 ---
 
-## 4. Challan Anomaly Pipeline
+## 4. Invoice Anomaly Pipeline
 
-The pipeline utilizes a 4-stage SRE-grade architecture to process invoices and challans:
+The pipeline utilizes a 4-stage SRE-grade architecture to process invoices:
 1. **Ingress Validation**: Validates `InvoiceIngress` via Pydantic to catch malformed payloads.
 2. **Vision Extraction**: Processes the Base64 image using Gemini 1.5 Flash natively (with `asyncio.to_thread` for event loop protection).
 3. **Deterministic Anomaly Engine**: Pure Python anomaly checks (Line Item Math, Grand Total Balance, Duplicate Document Detection).

@@ -1,5 +1,5 @@
 """
-Pydantic v2 schemas for the Challan Anomaly Detection Pipeline.
+Pydantic v2 schemas for the Invoice Anomaly Detection Pipeline.
 
 Governs ingress validation (InvoiceIngress) and structured extraction
 output (ExtractedInvoice / LineItem) per data-validation.md rules.
@@ -12,12 +12,12 @@ from typing import List, Optional
 class InvoiceIngress(BaseModel):
     """Incoming API request payload for document processing."""
     document_id: str = Field(..., description="Unique transaction lookup ID")
-    base64_image: str = Field(..., description="Raw Base64 string of the challan or invoice scan")
+    base64_image: str = Field(..., description="Raw Base64 string of the invoice scan")
     metadata: Optional[dict] = None
 
 
 class LineItem(BaseModel):
-    """Single row extracted from an invoice/challan document."""
+    """Single row extracted from an invoice document."""
     item_code: str
     description: str
     quantity: float

@@ -14,7 +14,7 @@ import json
 from src.router import classify_and_route
 from src.health import provider_statuses, stats, health_ping_loop
 from src.schemas import InvoiceIngress, ExtractedInvoice
-from src.vision_client import extract_challan_data
+from src.vision_client import extract_invoice_data
 from src.anomaly import analyze_document_anomalies
 
 logger = logging.getLogger("server")
@@ -682,7 +682,7 @@ def get_efficiency_metrics(request: Request):
 
 
 # ============================================================
-# CHALLAN ANOMALY PIPELINE — v2.5.0
+# INVOICE ANOMALY PIPELINE — v2.5.0
 # ============================================================
 
 def _fetch_invoice_history() -> List[str]:
@@ -724,7 +724,7 @@ def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, flags:
 async def ingest_invoice_payload(payload: InvoiceIngress, background_tasks: BackgroundTasks):
     try:
         # Step 1: Execute Cloud Vision Extraction (Native Free Tier Cascade)
-        raw_extraction = await extract_challan_data(payload.base64_image)
+        raw_extraction = await extract_invoice_data(payload.base64_image)
         
         # Step 2: Fetch unique invoice history markers from local DuckDB memory to check duplicates
         duckdb_history_cache = _fetch_invoice_history()
