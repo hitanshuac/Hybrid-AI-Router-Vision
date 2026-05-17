@@ -46,10 +46,10 @@ MODEL_CONSTRAINTS = {
     "ollama": 8000
 }
 
-VISION_GROQ_MODEL = "llama-3.2-11b-vision-preview"
-VISION_OPENROUTER_MODEL = "google/gemini-1.5-flash"
+VISION_GROQ_MODEL = "llama-3.2-11b-vision-preview" # Decommissioned, will fallback
+VISION_OPENROUTER_MODEL = "google/gemini-flash-1.5"
 VISION_NVIDIA_MODEL = "meta/llama-3.2-90b-vision-instruct"
-VISION_GEMINI_MODEL = "gemini-1.5-flash"
+VISION_GEMINI_MODEL = "gemini-2.5-flash"
 VISION_LOCAL_MODEL = "llava:13b"
 
 # ============================================================
