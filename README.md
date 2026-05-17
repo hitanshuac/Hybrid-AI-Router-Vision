@@ -94,7 +94,7 @@ To interact with the router via a sleek ChatGPT-like conversational interface:
 
 ### 4. Monitor Efficiency & Telemetry
 - **Live SRE Dashboard (User-Facing)**: Open **[http://localhost:8000/dashboard](http://localhost:8000/dashboard)** (or simply **[http://localhost:8000](http://localhost:8000)**) in your browser. This displays a beautiful real-time UI mapping the status of your API key pools, provider latencies, and request counts.
-- **Telemetry API (Raw JSON)**: Query **`http://localhost:8000/api/v1/metrics/efficiency`**. *Note: Opening this in a browser displays a raw JSON telemetry payload containing compaction statistics, tokens saved, and logs from the DuckDB instance.*
+- **Telemetry API (Raw JSON)**: Query **`http://localhost:8000/api/v1/metrics/efficiency`**. *Note: Opening this URL directly in a web browser will automatically redirect you to the visual `/dashboard` due to HTTP Content Negotiation. To retrieve the raw JSON, query it programmatically or via a CLI tool like `curl`.*
 ```bash
 curl http://localhost:8000/api/v1/metrics/efficiency
 ```
