@@ -34,6 +34,9 @@ graph TD
     Return --> Telemetry[DuckDB Telemetry Engine]
 ```
 
+![Architecture Diagram](docs/assets/architecture_diagram_v2_2_0.png)
+
+
 ### The 5-Step Compaction & Routing Sequence
 Every request array flowing through the gateway is processed through five immutable stages to eliminate context drift and minimize token wastage:
 
@@ -65,6 +68,8 @@ In accordance with our strict data engineering standards:
 - **Non-Blocking Validation**: Pydantic schemas validate all payloads without blockages.
 - **Parquet Quarantine Isolation**: Any corrupted or malformed data that fails schema validation is immediately caught and routed to isolated `data/quarantine_*.parquet` files. This isolates bad records without interrupting active pipeline ingestion or raising uncaught runtime exceptions.
 
+![Terminal Output Ingestion](docs/assets/terminal_output_ingestion.png)
+
 ---
 
 ## 🚀 First-Run Setup (The "Login")
@@ -93,6 +98,8 @@ To interact with the router via a sleek ChatGPT-like conversational interface:
 ```bash
 curl http://localhost:8000/api/v1/metrics/efficiency
 ```
+
+![LLM Live Dashboard](docs/assets/LLM-live-dashboard.png)
 
 ---
 
