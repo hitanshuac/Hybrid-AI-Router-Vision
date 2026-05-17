@@ -32,7 +32,7 @@ def _sync_extract(base64_data: str, api_key: str) -> dict:
     async wrapper below.
     """
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("models/gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
     # Pack image matrix payload natively
     image_payload = {
