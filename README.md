@@ -1,4 +1,4 @@
-# 🚀 Hybrid AI Router: Agentic Pipeline (v2.4.0)
+# 🚀 Hybrid AI Router: Agentic Pipeline (v2.4.1)
 
 A high-performance, SRE-grade API Gateway and Data Engineering pipeline. This system maximizes cloud resilience through a multi-provider waterfall cascade, enforces strict behavioral personas, and maintains absolute data integrity and token efficiency via a dedicated **Telemetry & Compaction Plane**.
 
@@ -69,6 +69,12 @@ In accordance with our strict data engineering standards:
 - **Parquet Quarantine Isolation**: Any corrupted or malformed data that fails schema validation is immediately caught and routed to isolated `data/quarantine_*.parquet` files. This isolates bad records without interrupting active pipeline ingestion or raising uncaught runtime exceptions.
 
 ![Terminal Output Ingestion](docs/assets/terminal_output_ingestion.png)
+
+### 4. Non-Blocking SRE Threadpool & Content-Negotiation Plane
+To achieve absolute resilience and zero main-thread freezing:
+- **FastAPI Threadpool Routing**: All telemetry-producing endpoints (`/dashboard` and `/api/v1/metrics/efficiency`) are served via standard synchronous `def` handlers. This causes FastAPI to automatically run them on Starlette's background threadpool, offloading synchronous DuckDB file I/O operations from the main ASGI event loop. This guarantees non-blocking execution of the LLM pipeline and completely eliminates connection resets (`WinError 10054`) under high load.
+- **HTTP Content Negotiation**: The `/api/v1/metrics/efficiency` endpoint implements content negotiation. It seamlessly responds with structured compaction JSON to machine clients (`Accept: application/json` or `*/*`), while detecting web browser traffic (`Accept: text/html`) and instantly redirecting users to the visual real-time `/dashboard`.
+
 
 ---
 
