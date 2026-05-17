@@ -9,7 +9,7 @@ A high-performance, SRE-grade API Gateway and Data Engineering pipeline. This sy
 Built for **Bulletproof Reliability**, the system enforces strict SRE guardrails via the **Agentic Control Plane** and handles payloads through an optimized, zero-overhead execution pipeline.
 
 
-![Architecture Diagram](docs/assets/architecture_diagram_v2_2_0.png)
+![Architecture Diagram](docs/assets/architecture_diagram_v2_4_1.png)
 
 
 ### The 5-Step Compaction & Routing Sequence
