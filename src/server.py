@@ -3,13 +3,19 @@ import time
 import asyncio
 import logging
 import duckdb
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Union
+import datetime
+import pandas as pd
+import json
 
 from src.router import classify_and_route
 from src.health import provider_statuses, stats, health_ping_loop
+from src.schemas import InvoiceIngress, ExtractedInvoice
+from src.vision_client import extract_challan_data
+from src.anomaly import analyze_document_anomalies
 
 logger = logging.getLogger("server")
 
@@ -40,6 +46,15 @@ def _init_metrics_db():
                 prefixes_stripped INTEGER NOT NULL,
                 latency_sec REAL NOT NULL,
                 tier TEXT NOT NULL
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS invoice_ledger (
+                document_id VARCHAR PRIMARY KEY,
+                vendor VARCHAR,
+                total DOUBLE,
+                is_anomaly BOOLEAN,
+                anomaly_notes VARCHAR
             )
         """)
         con.close()
@@ -660,3 +675,96 @@ def get_efficiency_metrics(request: Request):
     except Exception as e:
         logger.error(f"[TELEMETRY] Metrics query failed: {e}")
         return JSONResponse(status_code=500, content={"error": f"Metrics unavailable: {e}"})
+
+
+# ============================================================
+# CHALLAN ANOMALY PIPELINE — v2.5.0
+# ============================================================
+
+def _fetch_invoice_history() -> List[str]:
+    """Fetch unique invoice history markers from local DuckDB memory to check duplicates."""
+    try:
+        con = duckdb.connect(_DB_PATH, read_only=True)
+        res = con.execute("SELECT document_id FROM invoice_ledger").fetchall()
+        con.close()
+        return [str(r[0]) for r in res]
+    except Exception as e:
+        logger.warning(f"[PIPELINE] Failed to fetch invoice history: {e}")
+        return []
+
+def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, flags: list):
+    """
+    Offloads telemetry logs to DuckDB using Starlette background worker pool.
+    Enforces rule sql-standards.md: Explicitly use INSERT OR REPLACE for perfect idempotency.
+    Uses a fresh DuckDB connection per background task execution to avoid thread lock contention.
+    """
+    try:
+        con = duckdb.connect(_DB_PATH)
+        vendor = data.get("vendor_name", "UNKNOWN")
+        total = float(data.get("grand_total", 0.0))
+        anomaly_notes = json.dumps(flags)
+        
+        con.execute(
+            """
+            INSERT OR REPLACE INTO invoice_ledger (document_id, vendor, total, is_anomaly, anomaly_notes)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [doc_id, vendor, total, is_anomaly, anomaly_notes]
+        )
+        con.close()
+        logger.info(f"[METRIC COMPACTION] Logged document {doc_id}. Anomaly Flag: {is_anomaly}")
+    except Exception as e:
+        logger.error(f"[TELEMETRY] Failed to persist invoice pipeline metrics: {e}")
+
+@app.post("/api/v1/pipeline/ingest")
+async def ingest_invoice_payload(payload: InvoiceIngress, background_tasks: BackgroundTasks):
+    try:
+        # Step 1: Execute Cloud Vision Extraction (Native Free Tier Cascade)
+        raw_extraction = await extract_challan_data(payload.base64_image)
+        
+        # Step 2: Fetch unique invoice history markers from local DuckDB memory to check duplicates
+        duckdb_history_cache = _fetch_invoice_history()
+        
+        # Step 3: Run Anomaly analysis
+        is_anomaly, anomaly_reports = analyze_document_anomalies(raw_extraction, duckdb_history_cache)
+        
+        # Step 4: Offload telemetry logs to DuckDB using Starlette background worker pool
+        # This keeps user API round-trip latency at sub-second speeds.
+        background_tasks.add_task(
+            persist_pipeline_telemetry,
+            payload.document_id,
+            raw_extraction,
+            is_anomaly,
+            anomaly_reports
+        )
+        
+        return {
+            "status": "PROCESSED",
+            "document_id": payload.document_id,
+            "is_anomaly": is_anomaly,
+            "flags": anomaly_reports,
+            "extracted_payload": raw_extraction
+        }
+        
+    except Exception as e:
+        # Graceful Degradation Protocol (data-validation.md): Route broken frames to quarantine
+        logger.error(f"[PIPELINE] Malformed or failed payload. Routing to quarantine. Error: {e}")
+        
+        quarantine_file = f"{_DB_DIR}/quarantine_{datetime.date.today().strftime('%Y%m%d')}.parquet"
+        error_record = pd.DataFrame([{
+            "document_id": payload.document_id,
+            "timestamp": datetime.datetime.utcnow(),
+            "error_msg": str(e)
+        }])
+        
+        try:
+            if os.path.exists(quarantine_file):
+                existing_df = pd.read_parquet(quarantine_file)
+                updated_df = pd.concat([existing_df, error_record], ignore_index=True)
+                updated_df.to_parquet(quarantine_file)
+            else:
+                error_record.to_parquet(quarantine_file)
+        except Exception as pq_err:
+            logger.error(f"[QUARANTINE] Failed to write quarantine parquet: {pq_err}")
+            
+        return {"status": "QUARANTINED", "reason": str(e)}

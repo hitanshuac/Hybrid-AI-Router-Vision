@@ -32,3 +32,15 @@ To maintain SRE compliance, any new multi-modal endpoint must adhere to the foll
 *   **Strict Event-Loop Protection**: Under no circumstances should synchronous filesystem reads/writes or database ingestion tasks block the main asynchronous threads.
 *   **O(1) Content Negotiation**: Dynamic provider health checks and token hydration must be performed through O(1) in-memory or localized caching, avoiding continuous active network/disk polling.
 *   **Telemetry Schemas**: Every multi-modal transaction is persisted into DuckDB with exact latency numbers, token counts, and input/output payload hashes.
+
+---
+
+## 4. Challan Anomaly Pipeline
+
+The pipeline utilizes a 4-stage SRE-grade architecture to process invoices and challans:
+1. **Ingress Validation**: Validates `InvoiceIngress` via Pydantic to catch malformed payloads.
+2. **Vision Extraction**: Processes the Base64 image using Gemini 1.5 Flash natively (with `asyncio.to_thread` for event loop protection).
+3. **Deterministic Anomaly Engine**: Pure Python anomaly checks (Line Item Math, Grand Total Balance, Duplicate Document Detection).
+4. **Persistence & Quarantine**: Valid data is written to DuckDB via `BackgroundTasks` using `INSERT OR REPLACE`. Malformed requests are safely quarantined to Parquet files without blocking the active stream.
+
+**Endpoint**: `POST /api/v1/pipeline/ingest`
