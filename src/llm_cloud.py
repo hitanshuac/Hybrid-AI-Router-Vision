@@ -25,7 +25,17 @@ def estimate_tokens(prompt: str) -> int:
 
 def estimate_tokens_from_messages(messages: list) -> int:
     """Estimate total token count across all messages in a conversation."""
-    total_chars = sum(len(m.get("content", "")) for m in messages if isinstance(m.get("content"), str))
+    total_chars = 0
+    for m in messages:
+        content = m.get("content", "")
+        if isinstance(content, str):
+            total_chars += len(content)
+        elif isinstance(content, list):
+            for part in content:
+                if part.get("type") == "text":
+                    total_chars += len(part.get("text", ""))
+                elif part.get("type") == "image_url":
+                    total_chars += 4000 # Rough image token estimate
     return total_chars // 4
 
 MODEL_CONSTRAINTS = {
@@ -36,10 +46,16 @@ MODEL_CONSTRAINTS = {
     "ollama": 8000
 }
 
+VISION_GROQ_MODEL = "llama-3.2-11b-vision-preview"
+VISION_OPENROUTER_MODEL = "google/gemini-1.5-flash"
+VISION_NVIDIA_MODEL = "meta/llama-3.2-90b-vision-instruct"
+VISION_GEMINI_MODEL = "gemini-1.5-flash"
+VISION_LOCAL_MODEL = "llava:13b"
+
 # ============================================================
 # SIMPLE CASCADE ENGINE
 # ============================================================
-def query_cloud(prompt=None, messages=None):
+def query_cloud(prompt=None, messages=None, image_data=None):
     """
     Tries providers in sequence: Groq -> OpenRouter -> NVIDIA -> Gemini -> Ollama.
     Stops at the first successful response.
@@ -54,6 +70,12 @@ def query_cloud(prompt=None, messages=None):
         est_tokens = estimate_tokens(prompt)
     else:
         raise ValueError("query_cloud requires either 'prompt' or 'messages'.")
+        
+    active_groq = VISION_GROQ_MODEL if image_data else "llama-3.3-70b-versatile"
+    active_openrouter = VISION_OPENROUTER_MODEL if image_data else "google/gemma-4-31b-it:free"
+    active_nvidia = VISION_NVIDIA_MODEL if image_data else "meta/llama-3.1-8b-instruct"
+    active_gemini = VISION_GEMINI_MODEL if image_data else GEMINI_MODEL
+    active_local = VISION_LOCAL_MODEL if image_data else LOCAL_MODEL_PRIMARY
     
     # 1. GROQ (Primary)
     if GROQ_API_KEYS:
@@ -65,7 +87,7 @@ def query_cloud(prompt=None, messages=None):
                     resp = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers={"Authorization": f"Bearer {key}"},
-                        json={"model": "llama-3.3-70b-versatile", "messages": msg_payload},
+                        json={"model": active_groq, "messages": msg_payload},
                         timeout=15
                     )
                     if resp.status_code == 200:
@@ -82,7 +104,7 @@ def query_cloud(prompt=None, messages=None):
                     resp = requests.post(
                         "https://openrouter.ai/api/v1/chat/completions",
                         headers={"Authorization": f"Bearer {key}"},
-                        json={"model": "google/gemma-4-31b-it:free", "messages": msg_payload},
+                        json={"model": active_openrouter, "messages": msg_payload},
                         timeout=15
                     )
                     if resp.status_code == 200:
@@ -99,7 +121,7 @@ def query_cloud(prompt=None, messages=None):
                     resp = requests.post(
                         "https://integrate.api.nvidia.com/v1/chat/completions",
                         headers={"Authorization": f"Bearer {key}"},
-                        json={"model": "meta/llama-3.1-8b-instruct", "messages": msg_payload},
+                        json={"model": active_nvidia, "messages": msg_payload},
                         timeout=15
                     )
                     if resp.status_code == 200:
@@ -116,7 +138,7 @@ def query_cloud(prompt=None, messages=None):
                     resp = requests.post(
                         "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
                         headers={"Authorization": f"Bearer {key}"},
-                        json={"model": GEMINI_MODEL, "messages": msg_payload},
+                        json={"model": active_gemini, "messages": msg_payload},
                         timeout=15
                     )
                     if resp.status_code == 200:
@@ -130,7 +152,7 @@ def query_cloud(prompt=None, messages=None):
         try:
             resp = requests.post(
                 f"{OLLAMA_HOST}/api/chat",
-                json={"model": LOCAL_MODEL_PRIMARY, "messages": msg_payload, "stream": False},
+                json={"model": active_local, "messages": msg_payload, "stream": False},
                 timeout=60
             )
             if resp.status_code == 200:

@@ -140,7 +140,7 @@ def classify_and_route(prompt, image_data=None, messages=None):
             )
 
         # === Step 5: Cascade ===
-        response = query_cloud(messages=working)
+        response = query_cloud(messages=working, image_data=image_data)
         return response, "CLOUD_CASCADE", compaction_metrics
 
     except Exception as e:

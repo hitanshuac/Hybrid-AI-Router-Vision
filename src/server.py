@@ -539,9 +539,13 @@ async def chat_completions(request: ChatCompletionRequest):
         if isinstance(msg.content, str):
             messages_plain.append({"role": msg.role, "content": msg.content})
         else:
-            # Multimodal: flatten to text-only for the cascade (images handled separately)
-            text_parts = "".join(p.get("text", "") for p in msg.content if p.get("type") == "text")
-            messages_plain.append({"role": msg.role, "content": text_parts})
+            if image_data:
+                # Keep multimodal dicts intact for vision cascade
+                messages_plain.append({"role": msg.role, "content": msg.content})
+            else:
+                # Multimodal: flatten to text-only for the cascade
+                text_parts = "".join(p.get("text", "") for p in msg.content if p.get("type") == "text")
+                messages_plain.append({"role": msg.role, "content": text_parts})
 
     # Send through our router
     start_time = time.time()
