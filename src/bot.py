@@ -37,7 +37,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_prompt = f"{history_context}\nuser: {user_text}" if history_context else user_text
 
     try:
-        response, model_used = classify_and_route(full_prompt, image_data=image_data)
+        response, model_used, *_ = classify_and_route(full_prompt, image_data=image_data)
 
         # Update in-memory history
         history.append({"role": "user", "content": user_text})

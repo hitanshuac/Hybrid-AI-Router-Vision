@@ -1,8 +1,10 @@
+import os
 import time
 import asyncio
 import logging
+import duckdb
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Union
 
@@ -12,6 +14,66 @@ from src.health import provider_statuses, stats, health_ping_loop
 logger = logging.getLogger("server")
 
 app = FastAPI(title="Hybrid AI Router API")
+
+# ============================================================
+# DuckDB Telemetry — v2.4.0
+# ============================================================
+_DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+os.makedirs(_DB_DIR, exist_ok=True)
+_DB_PATH = os.path.join(_DB_DIR, "pipeline_metrics.db")
+
+def _init_metrics_db():
+    """Initialize the DuckDB metrics database with WAL mode and memory cap."""
+    try:
+        con = duckdb.connect(_DB_PATH)
+        con.execute("PRAGMA memory_limit='256MB'")
+        con.execute("CREATE SEQUENCE IF NOT EXISTS compaction_log_id_seq START 1")
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS compaction_log (
+                id INTEGER PRIMARY KEY DEFAULT(nextval('compaction_log_id_seq')),
+                timestamp TEXT NOT NULL,
+                raw_tokens INTEGER NOT NULL,
+                compact_tokens INTEGER NOT NULL,
+                tokens_saved INTEGER NOT NULL,
+                savings_pct REAL NOT NULL,
+                messages_dropped INTEGER NOT NULL,
+                prefixes_stripped INTEGER NOT NULL,
+                latency_sec REAL NOT NULL,
+                tier TEXT NOT NULL
+            )
+        """)
+        con.close()
+        logger.info("[TELEMETRY] DuckDB metrics database initialized at %s", _DB_PATH)
+    except Exception as e:
+        logger.warning(f"[TELEMETRY] Failed to initialize metrics DB: {e}")
+
+def _record_compaction_metrics(metrics: dict, latency: float, tier: str):
+    """Persist one compaction telemetry row. Non-blocking — failures are logged, not raised."""
+    try:
+        con = duckdb.connect(_DB_PATH)
+        con.execute(
+            """
+            INSERT INTO compaction_log (id, timestamp, raw_tokens, compact_tokens, tokens_saved,
+                                        savings_pct, messages_dropped, prefixes_stripped, latency_sec, tier)
+            VALUES (nextval('compaction_log_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                time.strftime("%Y-%m-%dT%H:%M:%S"),
+                metrics.get("raw_tokens", 0),
+                metrics.get("compact_tokens", 0),
+                metrics.get("tokens_saved", 0),
+                metrics.get("savings_pct", 0.0),
+                metrics.get("messages_dropped", 0),
+                metrics.get("prefixes_stripped", 0),
+                round(latency, 4),
+                tier,
+            ],
+        )
+        con.close()
+    except Exception as e:
+        logger.warning(f"[TELEMETRY] Failed to record metrics: {e}")
+
+_init_metrics_db()
 
 
 # --- STARTUP: Launch background health pings ---
@@ -378,10 +440,20 @@ async def chat_completions(request: ChatCompletionRequest):
     if not prompt_text and not image_data:
         return JSONResponse(status_code=422, content={"error": "Malformed request: No text or image found in last message."})
 
+    # Serialize messages to plain dicts for downstream consumption
+    messages_plain = []
+    for msg in request.messages:
+        if isinstance(msg.content, str):
+            messages_plain.append({"role": msg.role, "content": msg.content})
+        else:
+            # Multimodal: flatten to text-only for the cascade (images handled separately)
+            text_parts = "".join(p.get("text", "") for p in msg.content if p.get("type") == "text")
+            messages_plain.append({"role": msg.role, "content": text_parts})
+
     # Send through our router
     start_time = time.time()
     try:
-        response_text, model_label = classify_and_route(prompt_text, image_data=image_data)
+        response_text, model_label, compaction_metrics = classify_and_route(prompt_text, image_data=image_data, messages=messages_plain)
         elapsed = time.time() - start_time
 
         # Track stats
@@ -389,6 +461,9 @@ async def chat_completions(request: ChatCompletionRequest):
         stats.successful += 1
         stats.last_provider = model_label
         stats.last_latency = elapsed
+
+        # Persist compaction telemetry to DuckDB
+        _record_compaction_metrics(compaction_metrics, elapsed, model_label)
     except Exception as e:
         stats.total_requests += 1
         stats.failed += 1
@@ -420,9 +495,9 @@ async def chat_completions(request: ChatCompletionRequest):
             }
         ],
         "usage": {
-            "prompt_tokens": 0,
+            "prompt_tokens": compaction_metrics.get("compact_tokens", 0),
             "completion_tokens": 0,
-            "total_tokens": 0
+            "total_tokens": compaction_metrics.get("compact_tokens", 0)
         }
     }
     
@@ -453,3 +528,57 @@ async def health_providers():
             "error": ps.error,
         }
     return result
+
+
+@app.get("/api/v1/metrics/efficiency")
+async def get_efficiency_metrics(request: Request):
+    """Compaction telemetry — aggregate stats and last 10 records from DuckDB."""
+    if "text/html" in request.headers.get("accept", ""):
+        return RedirectResponse(url="/dashboard")
+    try:
+        con = duckdb.connect(_DB_PATH, read_only=True)
+
+        summary = con.execute("""
+            SELECT
+                COUNT(*)            AS total_requests,
+                COALESCE(SUM(tokens_saved), 0)    AS total_tokens_saved,
+                COALESCE(ROUND(AVG(savings_pct), 2), 0) AS avg_savings_pct,
+                COALESCE(ROUND(AVG(latency_sec), 4), 0) AS avg_latency_sec,
+                COALESCE(SUM(messages_dropped), 0) AS total_messages_dropped,
+                COALESCE(SUM(prefixes_stripped), 0) AS total_prefixes_stripped
+            FROM compaction_log
+        """).fetchone()
+
+        recent = con.execute("""
+            SELECT timestamp, raw_tokens, compact_tokens, tokens_saved,
+                   savings_pct, messages_dropped, prefixes_stripped, latency_sec, tier
+            FROM compaction_log
+            ORDER BY id DESC
+            LIMIT 10
+        """).fetchall()
+
+        con.close()
+
+        recent_records = [
+            {
+                "timestamp": r[0], "raw_tokens": r[1], "compact_tokens": r[2],
+                "tokens_saved": r[3], "savings_pct": r[4], "messages_dropped": r[5],
+                "prefixes_stripped": r[6], "latency_sec": r[7], "tier": r[8],
+            }
+            for r in recent
+        ]
+
+        return {
+            "summary": {
+                "total_requests": summary[0],
+                "total_tokens_saved": summary[1],
+                "avg_savings_pct": summary[2],
+                "avg_latency_sec": summary[3],
+                "total_messages_dropped": summary[4],
+                "total_prefixes_stripped": summary[5],
+            },
+            "recent": recent_records,
+        }
+    except Exception as e:
+        logger.error(f"[TELEMETRY] Metrics query failed: {e}")
+        return JSONResponse(status_code=500, content={"error": f"Metrics unavailable: {e}"})

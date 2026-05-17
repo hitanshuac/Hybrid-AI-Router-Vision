@@ -16,7 +16,7 @@ def start_chat():
             if user_input.strip().lower() in ['exit', 'quit']:
                 break
             
-            response, model_used = classify_and_route(user_input)
+            response, model_used, *_ = classify_and_route(user_input)
             print(f"\n[{model_used}]:\n{response}\n")
             
         except KeyboardInterrupt:

@@ -23,11 +23,15 @@ This document logs every critical failure, its resolution, and its eventual outc
 | 15 | 2026-05-06 | **API Key Exposure** | Moved all keys to `secrets/*.txt` | ✅ **Stayed** | Security Standard |
 | 16 | 2026-05-11 | **NVIDIA Paid Model** | Switched to `meta/llama-3.1-8b-instruct` | ✅ **Stayed** | Free Tier |
 | 17 | 2026-05-11 | **Workspace Bloat** | Total System Purge (30+ files removed) | ✅ **Stayed** | Minimalist Baseline |
+| 18 | 2026-05-17 | **Context Drift (Ungrounded Models)** | Implemented Ephemeral Context Grounding v2.3.0 — system prompt injected at index 0 of every outbound payload | ✅ **Stayed** | Active |
+| 19 | 2026-05-17 | **Token Wastage (Uncompacted Payloads)** | Implemented Context Compaction v2.4.0 — boilerplate stripping, 10-msg sliding window, DuckDB telemetry tracking | ✅ **Stayed** | Active |
 
 ## 🧠 Key Learnings
 1.  **Complexity is a Debt**: Every "Smart" feature (RAG, Semantic Router) adds a failure point. In high-pressure engineering, **Cascading Fallbacks** beat **Complex Classification**.
 2.  **Environment is Fragile**: Git commands can wipe logic faster than you can write it. The `start_all.bat` and `retrospective.md` are the ONLY permanent anchors.
 3.  **Vendor Lock-in is Real**: AWS and Gemini can block you instantly. A multi-provider, multi-key rotational pool is the only way to guarantee 99.9% uptime on free tiers.
+4.  **System-Prompt Governance is an SRE Primitive**: Without an enforced grounding message, downstream models produce inconsistent personas across cascade tiers. Ephemeral injection at the router layer is the cheapest, most reliable fix — zero extra latency, zero persistence overhead.
+5.  **Measure Before You Optimize**: Compaction without telemetry is guessing. DuckDB-backed metrics on every request give you the hard data to prove token savings and justify architectural decisions.
 
 ---
 

@@ -30,11 +30,13 @@ def run_startup_checks():
 GROQ_API_KEYS = get_secrets_list('groq_api_key')
 OPENROUTER_API_KEYS = get_secrets_list('openrouter_api_key')
 NVIDIA_API_KEYS = get_secrets_list('nvidia_api_key')
+GEMINI_API_KEYS = get_secrets_list('gemini_api_key')
 
 # Simplified Defaults
 PRIMARY_CLOUD_MODEL = "llama-3.3-70b-versatile"
 SECONDARY_CLOUD_MODEL = "google/gemma-4-31b-it:free"
 SAFETY_NET_MODEL = "meta/llama-3.1-8b-instruct"
+GEMINI_MODEL = "gemini-2.5-flash"
 LOCAL_MODEL_PRIMARY = "gemma2:9b"
 
 # Ollama (Local) Configuration
