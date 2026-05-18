@@ -29,7 +29,9 @@ This document logs every critical failure, its resolution, and its eventual outc
 | 21 | 2026-05-17 | **Gemini SDK 404 Path Failure** | Stripped `models/` prefix namespace inside the constructor, passing flat model tracking strings. | ✅ **Stayed** | Stable Execution |
 | 22 | 2026-05-17 | **Base64 Token Inflation Bypass** | Decoupled Base64 character loops from calculation engine and applied a fixed `+1024` token weight proxy. | ✅ **Stayed** | Circuit breaker protected |
 | 23 | 2026-05-17 | **Silent Chat Array Flattening** | Intercepted client multi-modal arrays inside `server.py` to forward native structures to OpenAI/Groq standards. | ✅ **Stayed** | Multi-Modal Capable |
-
+| 24 | 2026-05-18 | **Router Port Conflict** | Shifted Vision Router from port `8000` to `8001` to resolve collision with legacy text router. | ✅ **Stayed** | Isolated Environments |
+| 25 | 2026-05-18 | **Egress Table Formatting** | Modified `dict_to_markdown_table` to extract nested list-of-dicts (line items) into separate tables. | ✅ **Stayed** | Clean Spreadsheets |
+| 26 | 2026-05-18 | **Telemetry Poisoning** | Added `_should_log_telemetry` guard to prevent Open WebUI auto-titles from poisoning DuckDB latency metrics. | ✅ **Stayed** | Accurate Telemetry |
 ## 🧠 Key Learnings
 1.  **Complexity is a Debt**: Every "Smart" feature (RAG, Semantic Router) adds a failure point. In high-pressure engineering, **Cascading Fallbacks** beat **Complex Classification**.
 2.  **Environment is Fragile**: Git commands can wipe logic faster than you can write it. The `start_all.bat` and `retrospective.md` are the ONLY permanent anchors.

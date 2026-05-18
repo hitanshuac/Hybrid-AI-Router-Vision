@@ -111,9 +111,9 @@ Hybrid-AI-Router-Vision/
 ### 4. Run the FastAPI Server with Uvicorn
 
 ```bash
-uvicorn src.server:app --host 0.0.0.0 --port 8080 --reload
+uvicorn src.server:app --host 0.0.0.0 --port 8001 --reload
 ```
-The server will now be accessible at `http://localhost:8080`. The interactive Swagger UI for API documentation can be found at `http://localhost:8080/docs`.
+The server will now be accessible at `http://localhost:8001`. The interactive Swagger UI for API documentation can be found at `http://localhost:8001/docs`.
 
 ### 5. Verification and Diagnostics
 
@@ -165,12 +165,19 @@ graph TD
         X[Secrets Manager secrets/*.txt]
         Y[RateLimitManager Circuit Breaker]
         Z[Event Loop Guarding Background tasks]
+        W[Port Isolation :8001]
+        V[Telemetry Auto-Title Bypass]
     end
     
+    subgraph Egress Engine
+        T[GFM Table Formatter v2.5.1]
+    end
+
     R --> D; R --> E;
     S --> D; S --> E;
     U --> D; U --> E;
     X --> F; X --> G; X --> I;
     Y --> F; Y --> G;
     Z --> L; Z --> M;
+    T --> B;
 ```

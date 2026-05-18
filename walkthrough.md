@@ -38,6 +38,12 @@ active_openrouter = VISION_OPENROUTER_MODEL if image_data else "google/gemma-4-3
 # ... cascades natively down
 ```
 
+### 4. SRE Guardrails and Egress Formatting
+In **`src/server.py`**, we added robust protections and quality-of-life formatting:
+- **Telemetry De-Poisoning**: A heuristic (`_should_log_telemetry`) now isolates phantom frontend auto-title generation requests, stopping them from artificially deflating our DuckDB latency metrics.
+- **Nested Table Extraction**: Replaced raw comma-separated JSON dumps in the vision output with a `dict_to_markdown_table` utility that gracefully unrolls nested list-of-dicts into discrete, spreadsheet-ready Markdown tables.
+- **Port Isolation**: Shifted the entire Vision ecosystem to Port `8001` to guarantee it can run synchronously alongside legacy text routers without port clashes.
+
 > [!SUCCESS]
 > The server boot test passed flawlessly, and all changes have been committed.
 
