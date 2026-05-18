@@ -7,9 +7,7 @@
 
 ---
 
-## 🌟 Overview
-
-The **Hybrid-AI-Router-Vision** is a next-generation, low-overhead, and high-availability multi-modal AI gateway designed for critical enterprise workflows. It intelligently routes complex vision and text payloads across a dynamic network of LLM providers, ensuring maximum uptime, cost efficiency, and performance. Beyond simple routing, it features an integrated **Invoice Ingest Engine** for automated document inspection, mathematical auditing, and validation.
+The **Hybrid-AI-Router-Vision** is a next-generation, low-overhead, and high-availability multi-modal AI gateway designed for critical enterprise workflows. It intelligently routes complex vision and text payloads across a dynamic network of LLM providers, ensuring maximum uptime, cost efficiency, and performance. Beyond simple routing, it features an integrated **Polymorphic Ingestion Engine** for automated document classification, structured OCR extraction, and validation.
 
 Built with SRE principles at its core, this system is a testament to resilience, operational rigor, and adaptive architecture. It is engineered to not just process requests, but to **survive** API outages, rate limits, and service degradations with graceful, cascading fallbacks.
 
@@ -19,7 +17,7 @@ Built with SRE principles at its core, this system is a testament to resilience,
 
 *   **Autonomous Multi-Modal Routing:** Dynamically detects image payloads and intelligently routes to vision-capable models across multiple providers (Groq, OpenRouter, NVIDIA NIM, Gemini, Ollama).
 *   **High-Availability Cascade Fallback:** Implements a robust, real-time fallback mechanism across provider tiers to guarantee service continuity even during external API outages or rate limits.
-*   **Invoice Audit & Validation Pipeline:** A dedicated 4-stage engine for structured OCR, deterministic arithmetic validation, grand total balancing, and duplicate invoice detection.
+*   **Polymorphic Ingestion Engine:** A dynamic 4-stage document ingestion pipeline featuring zero-shot document layout classification (`INVOICE` vs `LETTER`), target schema Pydantic generation matrices, deterministic arithmetic audits, and duplicate/history analytics.
 *   **Advanced SRE Telemetry & Optimization:** Leverages DuckDB for real-time request analytics, context compaction metrics, and efficiency tracking, all within a minimal memory footprint (256MB capped).
 *   **Ephemeral Context Grounding:** Enforces consistent model persona and behavior by injecting system prompts at the router layer, ensuring zero latency overhead.
 *   **Adaptive Token Management:** Features an intelligent token estimator with a dynamic `+1024` token proxy for Base64 image data, protecting against silent token inflation and ensuring circuit breaker accuracy.
@@ -46,14 +44,16 @@ This endpoint serves as the primary multi-modal AI chat interface, intelligently
     4.  **Gemini Engine:** `gemini-2.5-flash` (native multi-modal support, reliable)
     5.  **Ollama Local:** `llava:13b` (local fallback for extreme resilience or specific use cases)
 
-### 2. 📝 Invoice Ingest Engine (`POST /api/v1/pipeline/ingest`)
+### 2. 📝 Polymorphic Ingestion Engine (`POST /api/v1/pipeline/ingest`)
 
-This specialized engine provides a high-throughput pipeline for the automated inspection and validation of invoices or similar structured documents, critical for modern finance and supply chain operations.
-*   **4-Stage Document Validation Pipeline:**
-    1.  **Stage 1: Structured OCR ([src/vision_client.py](src/vision_client.py)):** The initial step leverages `gemini-2.5-flash` for advanced multi-modal OCR, extracting key-value pairs and tabular data from submitted invoice scans with high accuracy.
-    2.  **Stage 2: Deterministic Arithmetic Check ([src/anomaly.py](src/anomaly.py)):** Extracted data is fed into a pure Python logic layer that performs rigorous, deterministic arithmetic checks on line items, unit prices, taxes, and grand totals, catching calculation skew or formatting anomalies.
-    3.  **Stage 3: Dupe & History Audit ([src/server.py](src/server.py)):** Cross-references the extracted document ID against a historical ledger in DuckDB to prevent double-processing or ledger collisions.
-    4.  **Stage 4: Starlette Background Thread Offloading:** Any blocking database writes or logging are immediately offloaded to a Starlette background worker pool. This isolates synchronous file and DuckDB I/O from the main async loop, keeping API round-trip latency at sub-second speeds.
+This specialized engine provides a high-throughput, dual-track document processing pipeline that automatically adapts to the incoming document type (supporting invoices, unstructured letters, and correspondence).
+*   **4-Stage Polymorphic Validation & Ingestion Pipeline:**
+    1.  **Stage 1: Layout Classification ([src/vision_client.py](src/vision_client.py)):** Uses `gemini-2.5-flash` to execute zero-shot document layout taxonomy classification, dividing payloads into structured tabular pricing grids (`INVOICE`) or unstructured prose texts (`LETTER`).
+    2.  **Stage 2: Target Schema Generation Matrices ([src/vision_client.py](src/vision_client.py)):** Triggers target schema Pydantic extraction models (with strict types and temperature 0.0) mapping either complex invoice tables or letters (sender/recipient details, urgency scores 1-5, and intent analytics).
+    3.  **Stage 3: Adaptive Audits & Analytics ([src/anomaly.py](src/anomaly.py)):** 
+        - **Invoices:** Pass through deterministic mathematical arithmetic audits, checking sub-totals, tax matrices, duplicate IDs, and historical DuckDB ledger collisions.
+        - **Letters:** Skips numeric calculation loops, routing semantic intent indices directly to Starlette background thread queues.
+    4.  **Stage 4: Starlette Background Thread Offloading & Quarantine:** Any blocking filesystem I/O, parquet writes, or DuckDB updates are delegated to a Starlette background pool, maintaining sub-second user response cycles. Processing failures are auto-routed to daily partitioned quarantine Parquet files.
 
 ---
 
@@ -146,18 +146,31 @@ graph TD
     D --> F[Groq / OpenRouter / NVIDIA NIM / Gemini / Ollama];
     E --> G[Groq-Vision / OpenRouter-Vision / NVIDIA-Vision / Gemini-Vision / Ollama-Vision];
     
-    %% Invoice Flow
-    B -- "/api/v1/pipeline/ingest" --> H[Invoice Ingest Engine];
-    H --> I[Stage 1: Structured OCR src/vision_client.py];
-    I -- Gemini 2.5 Flash --> J[Stage 2: Deterministic Arithmetic Check src/anomaly.py];
-    J -- Pure Python Logic --> K[Stage 3: Dupe & History Audit src/server.py];
-    K -- DuckDB Ledger Query --> L[Stage 4: Async Handoff & Telemetry];
-    L -- Starlette Threadpool --> M[(DuckDB Telemetry & Ledger)];
+    %% Polymorphic Ingestion Flow
+    B -- "/api/v1/pipeline/ingest" --> H[Polymorphic Ingestion Engine];
+    H --> I[Stage 1: Document Classification & Layout Analysis src/vision_client.py];
+    I -- Gemini 2.5 Flash --> J{Document Type?};
+    
+    %% Invoice Track
+    J -- INVOICE --> K[Stage 2: Structured OCR & Pricing Extraction];
+    K --> L[Stage 3: Deterministic Arithmetic Check src/anomaly.py];
+    L --> M[Stage 4: Duplicate & Ledger Audit src/server.py];
+    M --> N[Starlette Background Handoff];
+    N --> O[(DuckDB invoice_ledger)];
+    
+    %% Letter Track
+    J -- LETTER --> P[Stage 2: Semantic Prose & Entity Extraction];
+    P --> Q[Stage 3: Background Telemetry Handoff src/server.py];
+    Q --> R[(DuckDB letter_ledger)];
+    
+    %% Quarantine Track
+    J -- UNKNOWN / Error --> S[Stage 2: Quarantine Handler];
+    S --> T[(Daily Parquet Partition)];
     
     %% Subgraphs for Services
     subgraph Core Services
-        C -- Context Grounding v2.3.0 --> R[System Prompt Injection];
-        C -- Context Compaction v2.4.0 --> S[Sliding Window Compaction];
+        C -- Context Grounding v2.3.0 --> R_G[System Prompt Injection];
+        C -- Context Compaction v2.4.0 --> S_C[Sliding Window Compaction];
         C -- Token Estimation --> U[Dynamic +1024 Token Proxy];
     end
     
@@ -170,14 +183,14 @@ graph TD
     end
     
     subgraph Egress Engine
-        T[GFM Table Formatter v2.5.1]
+        T_E[GFM Table Formatter v2.5.1]
     end
 
-    R --> D; R --> E;
-    S --> D; S --> E;
+    R_G --> D; R_G --> E;
+    S_C --> D; S_C --> E;
     U --> D; U --> E;
     X --> F; X --> G; X --> I;
     Y --> F; Y --> G;
-    Z --> L; Z --> M;
-    T --> B;
+    Z --> N; Z --> Q;
+    T_E --> B;
 ```

@@ -14,56 +14,62 @@ import asyncio
 import logging
 from google import generativeai as genai
 
+from src.schemas import ExtractedInvoice, ExtractedLetter, DocumentType
+
 logger = logging.getLogger("vision_client")
 
-# System grounding: ephemerally injected at execution time
-VISION_SYSTEM_PROMPT = (
-    "You are the Core Vision Extraction Node for the Hybrid AI Router Pipeline. "
-    "Analyze the provided invoice image and extract all elements with perfect textual fidelity. "
-    "Do not perform rounding or compute totals yourself—extract the exact values printed on the paper. "
-    "Return a JSON object with keys: invoice_number, vendor_name, date, line_items (array of "
-    "{item_code, description, quantity, unit_price, total_price}), tax_amount, grand_total."
-)
-
-
-def _sync_extract(base64_data: str, api_key: str) -> dict:
+async def classify_and_extract_document(base64_image: str, api_key: str) -> tuple[DocumentType, dict]:
     """
-    Synchronous extraction call. Isolated from the event loop by the
-    async wrapper below.
+    Two-stage execution abstraction wrapper. Classifies incoming asset geometry 
+    off the main thread and enforces targeted structural text mappings.
     """
+    return await asyncio.to_thread(_sync_pipeline_execution, base64_image, api_key)
+
+def _sync_pipeline_execution(base64_data: str, api_key: str) -> tuple[DocumentType, dict]:
+    if not api_key:
+        from src.config import GEMINI_API_KEYS
+        api_key = GEMINI_API_KEYS[0] if GEMINI_API_KEYS else ""
+        
+    if not api_key:
+        raise RuntimeError("No Gemini API key found. Vision extraction unavailable.")
+        
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-
-    # Pack image matrix payload natively
-    image_payload = {
-        "mime_type": "image/jpeg",
-        "data": base64_data,
-    }
-
-    response = model.generate_content(
-        [VISION_SYSTEM_PROMPT, image_payload],
-        generation_config={
-            "response_mime_type": "application/json",
-        },
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    
+    image_part = {"mime_type": "image/jpeg", "data": base64_data}
+    
+    # Stage 1: Zero-Shot Document Layout Classification
+    classification_prompt = (
+        "Analyze this document image layout. Classify its primary structural taxonomy rules.\n"
+        "Return strictly one word of these choices: 'INVOICE' if it contains pricing vectors, totals, grids;\n"
+        " or 'LETTER' if it represents unstructured text documents, correspondence, or notification prose."
     )
+    
+    type_response = model.generate_content([classification_prompt, image_part])
+    determined_type = type_response.text.strip().upper()
+    
+    # Normalize structural exceptions safely
+    if determined_type not in [DocumentType.INVOICE, DocumentType.LETTER]:
+        determined_type = DocumentType.UNKNOWN
+        
+    # Stage 2: Target Schema Generation Matrix
+    if determined_type == DocumentType.INVOICE:
+        extraction_prompt = "Extract accounting details accurately per data definition targets."
+        target_schema = ExtractedInvoice
+    elif determined_type == DocumentType.LETTER:
+        extraction_prompt = "Perform semantic prose extraction, tracking entities, intent metrics, and text arrays."
+        target_schema = ExtractedLetter
+    else:
+        raise ValueError(f"Document categorization execution failure. Unrecognized taxonomy framework.")
 
-    extracted = json.loads(response.text)
-    logger.info("[VISION] Extraction complete — invoice_number=%s", extracted.get("invoice_number", "N/A"))
-    return extracted
-
-
-async def extract_invoice_data(base64_data: str) -> dict:
-    """
-    Async entry point. Resolves the Gemini API key from the existing
-    secrets key pool (config.py) and offloads the synchronous SDK call
-    to a background thread via asyncio.to_thread().
-    """
-    from src.config import GEMINI_API_KEYS
-
-    if not GEMINI_API_KEYS:
-        raise RuntimeError("No Gemini API key found in secrets/. Vision extraction unavailable.")
-
-    api_key = GEMINI_API_KEYS[0]
-
-    # SRE: push synchronous SDK work off the ASGI event loop
-    return await asyncio.to_thread(_sync_extract, base64_data, api_key)
+    # Stage 3: Direct JSON Extraction
+    extraction_response = model.generate_content(
+        contents=[extraction_prompt, image_part],
+        generation_config=genai.GenerationConfig(
+            response_mime_type="application/json",
+            response_schema=target_schema,
+            temperature=0.0
+        )
+    )
+    
+    return DocumentType(determined_type), json.loads(extraction_response.text)

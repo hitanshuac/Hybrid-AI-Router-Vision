@@ -7,6 +7,13 @@ output (ExtractedInvoice / LineItem) per data-validation.md rules.
 
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from enum import Enum
+
+
+class DocumentType(str, Enum):
+    INVOICE = "INVOICE"
+    LETTER = "LETTER"
+    UNKNOWN = "UNKNOWN"
 
 
 class InvoiceIngress(BaseModel):
@@ -33,3 +40,14 @@ class ExtractedInvoice(BaseModel):
     line_items: List[LineItem]
     tax_amount: float
     grand_total: float
+
+
+class ExtractedLetter(BaseModel):
+    """Full unstructured text extraction output for correspondence."""
+    sender_entity: str = Field(..., description="The explicit organization or individual emitting the letter")
+    recipient_entity: str = Field(..., description="The target entity, company, or department receiving the text")
+    date_stamped: Optional[str] = Field(None, description="The document issue date if visibly stamped")
+    subject_line: Optional[str] = Field(None, description="The explicit reference header or subject summary line")
+    body_prose: str = Field(..., description="The continuous raw text extracted with matching paragraph boundaries")
+    semantic_intent: str = Field(..., description="The underlying goal of the letter: e.g., Dispute, Demand, Query, Acknowledgment")
+    urgency_score: int = Field(..., description="Calculated priority mapping scale from 1 (Informational) to 5 (Immediate Action Required)")

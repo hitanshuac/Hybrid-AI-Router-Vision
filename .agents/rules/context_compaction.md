@@ -54,3 +54,12 @@ version: 1.0.0 (Vision Core Amendment)
 - **Base64 Character Insulation**: Raw image strings must be isolated and ignored during standard text character length divisions (`len(text) // 4`) to prevent artifact length poisoning.
 - **Vision Token Proxy Penalty**: When an image is identified in the request messages content list, a static weight of **1,024 tokens** must be cleanly added to the calculated text token payload block.
 - **Circuit Breaker Integration**: If the combined (text + proxy vision tokens) count exceeds a destination target model limit (e.g., NVIDIA NIM cap at 4,000 tokens), the router must instantly trigger a `[PRE-FLIGHT BYPASS]` block and forward the payload to a high-capacity tier (e.g., Gemini 2.5 Flash).
+
+---
+version: 1.1.0 (Polymorphic Cascade Amendment)
+---
+
+### 8. Polymorphic Type Tracking
+- **Document Type Telemetry**: Explicitly assert the tracking of `document_classification` tags within the analytical metrics.
+- **Cascade Variance**: As part of the Polymorphic Ingestion Cascade (v1.1.0), the engine routes unstructured text (letters/memos) and structured tabular layouts (invoices) differently based on a zero-shot Gemini 2.5 Flash classification.
+- **Analytical Metrics**: You must track the classification label (`DocumentType`) returned by the Edge Node in the API JSON response to provide accurate telemetry on layout variance distributions.

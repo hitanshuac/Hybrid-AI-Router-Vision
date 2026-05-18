@@ -13,11 +13,80 @@ import json
 
 from src.router import classify_and_route
 from src.health import provider_statuses, stats, health_ping_loop
-from src.schemas import InvoiceIngress, ExtractedInvoice
-from src.vision_client import extract_invoice_data
+from src.schemas import InvoiceIngress, ExtractedInvoice, DocumentType
+from src.vision_client import classify_and_extract_document
 from src.anomaly import analyze_document_anomalies
 
 logger = logging.getLogger("server")
+
+
+# ============================================================
+# Egress Formatter — v2.5.1
+# ============================================================
+def dict_to_markdown_table(data: dict) -> str:
+    """Converts a flat dictionary into a GFM Markdown table for spreadsheet pasting.
+    Extracts nested list-of-dicts into separate tables appended below."""
+    main_lines = ["| Key | Value |", "|---|---|"]
+    extra_tables = []
+    
+    for key, val in data.items():
+        formatted_key = key.replace('_', ' ').title()
+        
+        if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
+            # Extract nested list of dicts into its own table
+            extra_tables.append(f"\n#### {formatted_key}\n")
+            
+            # Extract headers from the first item
+            headers = list(val[0].keys())
+            header_row = "| " + " | ".join(h.replace('_', ' ').title() for h in headers) + " |"
+            separator_row = "|" + "|".join("---" for _ in headers) + "|"
+            
+            extra_tables.append(header_row)
+            extra_tables.append(separator_row)
+            
+            for item in val:
+                row = []
+                for h in headers:
+                    cell_val = item.get(h, "")
+                    if not isinstance(cell_val, (str, int, float, bool)):
+                        cell_val = str(cell_val).replace("\n", " ")
+                    row.append(str(cell_val))
+                extra_tables.append("| " + " | ".join(row) + " |")
+                
+            main_lines.append(f"| **{formatted_key}** | *See {formatted_key} table below* |")
+        else:
+            if isinstance(val, list):
+                v_str = "<br>".join(str(i) for i in val)
+            elif not isinstance(val, (str, int, float, bool)):
+                v_str = str(val).replace("\n", " ")
+            else:
+                v_str = str(val)
+            main_lines.append(f"| **{formatted_key}** | {v_str} |")
+            
+    result = "\n".join(main_lines)
+    if extra_tables:
+        result += "\n" + "\n".join(extra_tables)
+    return result
+
+
+def _should_log_telemetry(messages: list) -> bool:
+    """Detects and isolates automated frontend requests (e.g. Open WebUI auto-title) from telemetry."""
+    if not messages:
+        return True
+    last_msg = messages[-1].get("content", "") if isinstance(messages[-1], dict) else ""
+    if not isinstance(last_msg, str):
+        return True
+    last_lower = last_msg.lower()
+    title_signatures = [
+        "generate a title",
+        "summarize this conversation in a few words",
+        "create a concise title",
+        "generate a concise",
+    ]
+    for sig in title_signatures:
+        if sig in last_lower:
+            return False
+    return True
 
 app = FastAPI(title="Hybrid AI Router API")
 
@@ -48,13 +117,18 @@ def _init_metrics_db():
                 tier TEXT NOT NULL
             )
         """)
+        con.execute("DROP TABLE IF EXISTS invoice_ledger")
         con.execute("""
-            CREATE TABLE IF NOT EXISTS invoice_ledger (
+            CREATE TABLE invoice_ledger (
                 document_id VARCHAR PRIMARY KEY,
-                vendor VARCHAR,
-                total DOUBLE,
+                invoice_number VARCHAR,
+                vendor_name VARCHAR,
+                grand_total DOUBLE,
                 is_anomaly BOOLEAN,
-                anomaly_notes VARCHAR
+                flags TEXT,
+                extracted_json TEXT,
+                latency_sec DOUBLE,
+                timestamp TIMESTAMP
             )
         """)
         con.close()
@@ -90,6 +164,28 @@ def _record_compaction_metrics(metrics: dict, latency: float, tier: str):
 
 _init_metrics_db()
 
+def _init_unstructured_ledger():
+    """Idempotently handles text data schemas using separate analytical ledgers."""
+    try:
+        with duckdb.connect(_DB_PATH) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS letter_ledger (
+                    document_id VARCHAR PRIMARY KEY,
+                    sender_entity VARCHAR,
+                    recipient_entity VARCHAR,
+                    subject_line VARCHAR,
+                    semantic_intent VARCHAR,
+                    urgency_score INTEGER,
+                    latency_sec DOUBLE,
+                    timestamp TIMESTAMP
+                )
+            """)
+        logger.info("[TELEMETRY] letter_ledger initialized")
+    except Exception as e:
+        logger.warning(f"[TELEMETRY] Failed to initialize letter_ledger DB: {e}")
+
+_init_unstructured_ledger()
+
 
 # --- STARTUP: Launch background health pings ---
 @app.on_event("startup")
@@ -108,6 +204,7 @@ def get_dashboard():
     tokens_saved = 0
     compaction_ratio = 0.0
     active_tier = "N/A"
+    pipeline_latency = 0.0
     try:
         con = duckdb.connect(_DB_PATH, read_only=True)
         row = con.execute("""
@@ -121,6 +218,16 @@ def get_dashboard():
             SELECT tier FROM compaction_log ORDER BY id DESC LIMIT 1
         """).fetchone()
         
+        try:
+            pipeline_row = con.execute("""
+                SELECT COALESCE(ROUND(AVG(latency_sec), 2), 0.0) FROM invoice_ledger
+            """).fetchone()
+            if pipeline_row:
+                pipeline_latency = float(pipeline_row[0])
+        except duckdb.CatalogException:
+            # Handle case where invoice_ledger table schema hasn't updated yet or table doesn't exist
+            pass
+            
         con.close()
         if row:
             tokens_saved = int(row[0])
@@ -409,12 +516,12 @@ def get_dashboard():
                     <div class="stat-label">Total Requests</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-val">{success_rate}%</div>
-                    <div class="stat-label">Success Rate</div>
+                    <div class="stat-val">{stats.last_latency:.1f}s</div>
+                    <div class="stat-label">Router Latency</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-val">{stats.last_latency:.1f}s</div>
-                    <div class="stat-label">Last Latency</div>
+                    <div class="stat-val">{pipeline_latency:.1f}s</div>
+                    <div class="stat-label">Vision Latency</div>
                 </div>
             </div>
 
@@ -455,7 +562,7 @@ def get_dashboard():
                 </div>
             </div>
 
-            <footer>End-to-End Resilience &bull; Port 8000 &bull; Auto-refreshes every 30s</footer>
+            <footer>End-to-End Resilience &bull; Port 8001 &bull; Auto-refreshes every 30s</footer>
         </div>
         <script>
             async function updateCompactionMetrics() {{
@@ -506,7 +613,7 @@ class ChatCompletionRequest(BaseModel):
     temperature: Optional[float] = None
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
+async def chat_completions(request: ChatCompletionRequest, background_tasks: BackgroundTasks):
     if not request.messages:
         return JSONResponse(status_code=400, content={"error": "No messages provided"})
         
@@ -533,6 +640,59 @@ async def chat_completions(request: ChatCompletionRequest):
     if not prompt_text and not image_data:
         return JSONResponse(status_code=422, content={"error": "Malformed request: No text or image found in last message."})
 
+    # PROXY INTERCEPTOR: Route multi-modal payloads directly to Polymorphic Cascade
+    if image_data:
+        import uuid
+        doc_id = f"doc-{uuid.uuid4().hex[:8]}"
+        ingress_payload = InvoiceIngress(document_id=doc_id, base64_image=image_data)
+        
+        # Internally invoke the polymorphic pipeline
+        pipeline_response = await ingest_document_payload(ingress_payload, background_tasks)
+        
+        # Serialize rich JSON to a markdown string for the frontend renderer
+        status = pipeline_response.get("status", "ERROR")
+        doc_class = pipeline_response.get("document_classification", "UNKNOWN")
+        latency = pipeline_response.get("latency_sec", 0.0)
+        
+        formatted_response = f"### Polymorphic Engine: {status}\n\n"
+        formatted_response += f"**Classification:** `{doc_class}`\n"
+        formatted_response += f"**Latency:** `{latency}s`\n\n"
+        # Update Router Stats
+        stats.total_requests += 1
+        stats.successful += 1
+        stats.last_provider = f"Polymorphic ({doc_class})"
+        stats.last_latency = latency
+
+        if status == "PROCESSED":
+            extracted = pipeline_response.get("payload", {})
+            formatted_response += "#### Extracted Data\n\n"
+            formatted_response += dict_to_markdown_table(extracted) + "\n"
+        else:
+            formatted_response += f"**Reason:** {pipeline_response.get('reason', 'Unknown error')}"
+        
+        response_json = {
+            "id": f"chatcmpl-{int(time.time())}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": "polymorphic-router",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": formatted_response,
+                    },
+                    "finish_reason": "stop"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0
+            }
+        }
+        return response_json
+
     # Serialize messages to plain dicts for downstream consumption
     messages_plain = []
     for msg in request.messages:
@@ -553,14 +713,18 @@ async def chat_completions(request: ChatCompletionRequest):
         response_text, model_label, compaction_metrics = classify_and_route(prompt_text, image_data=image_data, messages=messages_plain)
         elapsed = time.time() - start_time
 
-        # Track stats
-        stats.total_requests += 1
-        stats.successful += 1
-        stats.last_provider = model_label
-        stats.last_latency = elapsed
+        # Track stats (Skip auto-title ghosts from immediately overwriting heavy vision logs)
+        is_real_request = _should_log_telemetry(messages_plain)
+        if is_real_request:
+            stats.total_requests += 1
+            stats.successful += 1
+            stats.last_provider = model_label
+            stats.last_latency = elapsed
 
-        # Persist compaction telemetry to DuckDB
-        _record_compaction_metrics(compaction_metrics, elapsed, model_label)
+            # Persist compaction telemetry to DuckDB (only for real requests)
+            _record_compaction_metrics(compaction_metrics, elapsed, model_label)
+        else:
+            logger.info(f"[TELEMETRY BYPASS] Ignored auto-title request ({elapsed:.1f}s).")
     except Exception as e:
         stats.total_requests += 1
         stats.failed += 1
@@ -696,7 +860,7 @@ def _fetch_invoice_history() -> List[str]:
         logger.warning(f"[PIPELINE] Failed to fetch invoice history: {e}")
         return []
 
-def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, flags: list):
+def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, flags: list, duration: float):
     """
     Offloads telemetry logs to DuckDB using Starlette background worker pool.
     Enforces rule sql-standards.md: Explicitly use INSERT OR REPLACE for perfect idempotency.
@@ -704,71 +868,124 @@ def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, flags:
     """
     try:
         con = duckdb.connect(_DB_PATH)
+        invoice_number = data.get("invoice_number", "UNKNOWN")
         vendor = data.get("vendor_name", "UNKNOWN")
         total = float(data.get("grand_total", 0.0))
         anomaly_notes = json.dumps(flags)
+        extracted_json = json.dumps(data)
         
         con.execute(
             """
-            INSERT OR REPLACE INTO invoice_ledger (document_id, vendor, total, is_anomaly, anomaly_notes)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO invoice_ledger 
+            (document_id, invoice_number, vendor_name, grand_total, is_anomaly, flags, extracted_json, latency_sec, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [doc_id, vendor, total, is_anomaly, anomaly_notes]
+            [doc_id, invoice_number, vendor, total, is_anomaly, anomaly_notes, extracted_json, duration, datetime.datetime.utcnow()]
         )
         con.close()
-        logger.info(f"[METRIC COMPACTION] Logged document {doc_id}. Anomaly Flag: {is_anomaly}")
+        logger.info(f"[METRIC COMPACTION] Logged document {doc_id} in {duration:.2f}s. Anomaly Flag: {is_anomaly}")
     except Exception as e:
         logger.error(f"[TELEMETRY] Failed to persist invoice pipeline metrics: {e}")
 
-@app.post("/api/v1/pipeline/ingest")
-async def ingest_invoice_payload(payload: InvoiceIngress, background_tasks: BackgroundTasks):
+def persist_letter_telemetry(doc_id: str, data: dict, duration_sec: float):
+    """Fulfills sql-standards.md: Guarantees idempotent writes for semantic records."""
     try:
-        # Step 1: Execute Cloud Vision Extraction (Native Free Tier Cascade)
-        raw_extraction = await extract_invoice_data(payload.base64_image)
-        
-        # Step 2: Fetch unique invoice history markers from local DuckDB memory to check duplicates
-        duckdb_history_cache = _fetch_invoice_history()
-        
-        # Step 3: Run Anomaly analysis
-        is_anomaly, anomaly_reports = analyze_document_anomalies(raw_extraction, duckdb_history_cache)
-        
-        # Step 4: Offload telemetry logs to DuckDB using Starlette background worker pool
-        # This keeps user API round-trip latency at sub-second speeds.
-        background_tasks.add_task(
-            persist_pipeline_telemetry,
-            payload.document_id,
-            raw_extraction,
-            is_anomaly,
-            anomaly_reports
-        )
-        
-        return {
-            "status": "PROCESSED",
-            "document_id": payload.document_id,
-            "is_anomaly": is_anomaly,
-            "flags": anomaly_reports,
-            "extracted_payload": raw_extraction
-        }
-        
+        with duckdb.connect(_DB_PATH) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO letter_ledger 
+                (document_id, sender_entity, recipient_entity, subject_line, semantic_intent, urgency_score, latency_sec, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                doc_id,
+                data.get("sender_entity"),
+                data.get("recipient_entity"),
+                data.get("subject_line"),
+                data.get("semantic_intent"),
+                data.get("urgency_score"),
+                duration_sec,
+                datetime.datetime.utcnow()
+            ))
+        logger.info(f"[METRIC COMPACTION] Logged letter {doc_id} in {duration_sec:.2f}s.")
     except Exception as e:
-        # Graceful Degradation Protocol (data-validation.md): Route broken frames to quarantine
-        logger.error(f"[PIPELINE] Malformed or failed payload. Routing to quarantine. Error: {e}")
+        logger.error(f"[TELEMETRY] Failed to persist letter pipeline metrics: {e}")
+
+def _handle_quarantine_drop(doc_id: str, error_msg: str):
+    logger.error(f"[PIPELINE] Malformed or failed payload. Routing to quarantine. Error: {error_msg}")
+    quarantine_file = f"{_DB_DIR}/quarantine_{datetime.date.today().strftime('%Y%m%d')}.parquet"
+    error_record = pd.DataFrame([{
+        "document_id": doc_id,
+        "timestamp": datetime.datetime.utcnow(),
+        "error_msg": error_msg
+    }])
+    try:
+        if os.path.exists(quarantine_file):
+            existing_df = pd.read_parquet(quarantine_file)
+            updated_df = pd.concat([existing_df, error_record], ignore_index=True)
+            updated_df.to_parquet(quarantine_file)
+        else:
+            error_record.to_parquet(quarantine_file)
+    except Exception as pq_err:
+        logger.error(f"[QUARANTINE] Failed to write quarantine parquet: {pq_err}")
+
+@app.post("/api/v1/pipeline/ingest")
+async def ingest_document_payload(payload: InvoiceIngress, background_tasks: BackgroundTasks):
+    """
+    Polymorphic Ingestion Engine entry point. Intelligently splits the data processing pipeline 
+    runtimes based on an upfront structural categorization pass.
+    """
+    t_start = time.perf_counter()
+    from src.config import GEMINI_API_KEYS
+    api_key = GEMINI_API_KEYS[0] if GEMINI_API_KEYS else ""
+    
+    try:
+        # Step 1: Classify document pattern profile and extract targeting parameters safely
+        doc_type, extracted_data = await classify_and_extract_document(payload.base64_image, api_key)
         
-        quarantine_file = f"{_DB_DIR}/quarantine_{datetime.date.today().strftime('%Y%m%d')}.parquet"
-        error_record = pd.DataFrame([{
-            "document_id": payload.document_id,
-            "timestamp": datetime.datetime.utcnow(),
-            "error_msg": str(e)
-        }])
-        
-        try:
-            if os.path.exists(quarantine_file):
-                existing_df = pd.read_parquet(quarantine_file)
-                updated_df = pd.concat([existing_df, error_record], ignore_index=True)
-                updated_df.to_parquet(quarantine_file)
-            else:
-                error_record.to_parquet(quarantine_file)
-        except Exception as pq_err:
-            logger.error(f"[QUARANTINE] Failed to write quarantine parquet: {pq_err}")
+        # Step 2: Adaptive Processing Fork
+        if doc_type == DocumentType.INVOICE:
+            historical_keys = _fetch_invoice_history()
+            is_anomaly, anomaly_reports = analyze_document_anomalies(extracted_data, historical_keys)
             
-        return {"status": "QUARANTINED", "reason": str(e)}
+            total_latency_sec = time.perf_counter() - t_start
+            background_tasks.add_task(
+                persist_pipeline_telemetry,
+                payload.document_id, extracted_data, is_anomaly, anomaly_reports, total_latency_sec
+            )
+            
+            return {
+                "status": "PROCESSED",
+                "document_classification": doc_type.value,
+                "document_id": payload.document_id,
+                "is_anomaly": is_anomaly,
+                "latency_sec": round(total_latency_sec, 4),
+                "payload": extracted_data
+            }
+            
+        elif doc_type == DocumentType.LETTER:
+            # Skip the mathematical balance check entirely (letters don't have subtotals)
+            total_latency_sec = time.perf_counter() - t_start
+            
+            background_tasks.add_task(
+                persist_letter_telemetry,
+                payload.document_id, extracted_data, total_latency_sec
+            )
+            
+            return {
+                "status": "PROCESSED",
+                "document_classification": doc_type.value,
+                "document_id": payload.document_id,
+                "latency_sec": round(total_latency_sec, 4),
+                "payload": extracted_data
+            }
+        else:
+            raise ValueError(f"Unknown document classification: {doc_type}")
+            
+    except Exception as cascade_error:
+        total_latency_sec = time.perf_counter() - t_start
+        _handle_quarantine_drop(payload.document_id, str(cascade_error))
+        return {
+            "status": "QUARANTINED",
+            "document_id": payload.document_id,
+            "reason": str(cascade_error),
+            "latency_sec": round(total_latency_sec, 4)
+        }
