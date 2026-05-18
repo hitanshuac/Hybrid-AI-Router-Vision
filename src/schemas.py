@@ -6,7 +6,7 @@ output (ExtractedInvoice / LineItem) per data-validation.md rules.
 """
 
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 from enum import Enum
 
 
