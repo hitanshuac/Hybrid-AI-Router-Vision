@@ -88,10 +88,10 @@ def _should_log_telemetry(messages: list) -> bool:
             return False
     return True
 
-app = FastAPI(title="Hybrid AI Router API")
+app = FastAPI(title="Hybrid AI Router Vision API")
 
 # ============================================================
-# DuckDB Telemetry — v2.4.0
+# DuckDB Telemetry — v2.6.0
 # ============================================================
 _DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 os.makedirs(_DB_DIR, exist_ok=True)
@@ -290,7 +290,7 @@ def get_dashboard():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Hybrid AI Router | Dashboard</title>
+        <title>Hybrid AI Router Vision | Dashboard</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
         <style>
@@ -503,8 +503,8 @@ def get_dashboard():
         <div class="dashboard">
             <div class="header">
                 <div class="status-pill"><span class="dot"></span> System Active</div>
-                <h1>Hybrid AI Router</h1>
-                <p class="subtitle">Minimalist Waterfall Engine v2.4.0</p>
+                <h1>Hybrid AI Router Vision</h1>
+                <p class="subtitle">Polymorphic Vision Engine v2.6.0</p>
             </div>
 
             <div class="refresh-bar"></div>
