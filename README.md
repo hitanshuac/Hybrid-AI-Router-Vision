@@ -31,7 +31,7 @@ Built with SRE principles at its core, this system is a testament to resilience,
 
 At its heart, the system operates as a dual-engine architecture, each optimized for its specific domain while sharing a common, resilient infrastructure.
 
-![System Architecture](docs/assets/system_architecture_v2_6_0.png)
+![System Architecture](docs/assets/system_architecture.png)
 
 ### 1. 🌐 Gateway Engine (`POST /v1/chat/completions`)
 
@@ -135,62 +135,98 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 The following raw Mermaid diagram governs the visual representation of our gateway and invoice pipeline. It is automatically parsed and compiled by our automation workflows whenever a new version is pushed to GitHub.
 
 ```mermaid
-graph TD
-    A[Client Request] --> B{API Gateway src/server.py};
-    
-    %% Gateway Flow
-    B -- "/v1/chat/completions" --> C{Router Logic src/router.py};
-    C -- Text Payload --> D[Text Cascade src/llm_cloud.py];
-    C -- Image Payload --> E[Vision Cascade src/llm_cloud.py];
-    
-    D --> F[Groq / OpenRouter / NVIDIA NIM / Gemini / Ollama];
-    E --> G[Groq-Vision / OpenRouter-Vision / NVIDIA-Vision / Gemini-Vision / Ollama-Vision];
-    
-    %% Polymorphic Ingestion Flow
-    B -- "/api/v1/pipeline/ingest" --> H[Polymorphic Ingestion Engine];
-    H --> I[Stage 1: Document Classification & Layout Analysis src/vision_client.py];
-    I -- Gemini 2.5 Flash --> J{Document Type?};
-    
-    %% Invoice Track
-    J -- INVOICE --> K[Stage 2: Structured OCR & Pricing Extraction];
-    K --> L[Stage 3: Deterministic Arithmetic Check src/anomaly.py];
-    L --> M[Stage 4: Duplicate & Ledger Audit src/server.py];
-    M --> N[Starlette Background Handoff];
-    N --> O[(DuckDB invoice_ledger)];
-    
-    %% Letter Track
-    J -- LETTER --> P[Stage 2: Semantic Prose & Entity Extraction];
-    P --> Q[Stage 3: Background Telemetry Handoff src/server.py];
-    Q --> R[(DuckDB letter_ledger)];
-    
-    %% Quarantine Track
-    J -- UNKNOWN / Error --> S[Stage 2: Quarantine Handler];
-    S --> T[(Daily Parquet Partition)];
-    
-    %% Subgraphs for Services
-    subgraph Core Services
-        C -- Context Grounding v2.3.0 --> R_G[System Prompt Injection];
-        C -- Context Compaction v2.4.0 --> S_C[Sliding Window Compaction];
-        C -- Token Estimation --> U[Dynamic +1024 Token Proxy];
-    end
-    
-    subgraph SRE Guardrails
-        X[Secrets Manager secrets/*.txt]
-        Y[RateLimitManager Circuit Breaker]
-        Z[Event Loop Guarding Background tasks]
-        W[Port Isolation :8001]
-        V[Telemetry Auto-Title Bypass]
-    end
-    
-    subgraph Egress Engine
-        T_E[GFM Table Formatter v2.5.1]
+flowchart TD
+    %% Styling Definitions
+    classDef client fill:#E0F7FA,stroke:#00ACC1,stroke-width:2px,color:#006064;
+    classDef gate fill:#EDE7F6,stroke:#5E35B1,stroke-width:2px,color:#311B92;
+    classDef router fill:#FFF3E0,stroke:#FB8C00,stroke-width:2px,color:#E65100;
+    classDef engine fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20;
+    classDef provider fill:#ECEFF1,stroke:#546E7A,stroke-width:2px,color:#263238;
+    classDef db fill:#FFEBEE,stroke:#E53935,stroke-width:2px,color:#B71C1C;
+
+    %% Ingress & Client Interface
+    subgraph Ingress ["🌐 Client Ingress & Event Loop Protection (src/server.py)"]
+        direction TB
+        Client["💻 Client Applications<br/>(Open WebUI / REST API / Bot)"]
+        PortIsolation["🔒 Port Isolation Guard<br/>(Internal Gateway Port :8001)"]
+        APIGateway["⚡ FastAPI ASGI Core<br/>(Dual-endpoint controller)"]
+        DePoison["🧼 Telemetry De-Poisoner<br/>(Filters frontend auto-title pings)"]
+        
+        Client -->|1. HTTP Request| PortIsolation
+        PortIsolation -->|2. Port Guarded Ingress| APIGateway
+        APIGateway -->|3. Metric Protection| DePoison
     end
 
-    R_G --> D; R_G --> E;
-    S_C --> D; S_C --> E;
-    U --> D; U --> E;
-    X --> F; X --> G; X --> I;
-    Y --> F; Y --> G;
-    Z --> N; Z --> Q;
-    T_E --> B;
+    %% Split Processing Pipelines
+    DePoison -->|Route /v1/chat/completions| ChatRouter
+    DePoison -->|Route /api/v1/pipeline/ingest| IngestionEngine
+
+    %% Engine A: Cognitive Chat Router
+    subgraph ChatRouter ["🧠 Engine A: Multi-Modal Chat Gateway (src/router.py)"]
+        direction TB
+        DeepCopy["1. Message Deep Copy<br/>(Prevents concurrent state mutation)"] -->
+        Grounding["2. Context Grounding<br/>(Injects system prompt at index 0)"] -->
+        Stripper["3. Prefix Boilerplate Stripper<br/>(Strips verbose AI filler)"] -->
+        SlidingWindow["4. Sliding Window Compaction<br/>(Evicts history beyond 10-msg cap)"] -->
+        TokenEst["5. Recursive Token Estimator<br/>(Decouples Base64, adds +1024 token image proxy)"] -->
+        AdmissionControl{"6. Admission Control & Circuit Breaker"}
+        
+        AdmissionControl -->|Image Payload OR Tokens > 4000| VisionCascade["👁️ Vision Fallback Cascade"]
+        AdmissionControl -->|Text Only & Tokens <= 4000| TextCascade["📝 Text Fallback Cascade"]
+    end
+
+    %% Fallback cascades
+    subgraph Cascades ["🌊 Dynamic Fallback Waterfall Tiers (src/llm_cloud.py)"]
+        direction LR
+        subgraph TextCascade Waterfall
+            T1["1. Groq"] --> T2["2. OpenRouter"] --> T3["3. NVIDIA NIM"] --> T4["4. Gemini"] --> T5["5. Local Ollama"]
+        end
+        subgraph VisionCascade Waterfall
+            V1["1. Groq Vision"] --> V2["2. OpenRouter Vision"] --> V3["3. NVIDIA Vision"] --> V4["4. Gemini Vision"] --> V5["5. Local Ollama Vision"]
+        end
+    end
+
+    %% Engine B: 4-Stage Ingestion Engine
+    subgraph IngestionEngine ["📝 Engine B: Polymorphic Ingestion Cascade (src/vision_client.py)"]
+        direction TB
+        PydanticCheck["🔍 Stage 1: Ingress Pydantic Check<br/>(Isolates schema validation exceptions)"] -->
+        Classifier["🏷️ Stage 2: Gemini Layout Classifier<br/>(Zero-shot taxonomy: INVOICE vs LETTER)"] -->
+        DocDecision{"Document Layout?"}
+        
+        DocDecision -->|INVOICE| InvoiceExtract["📐 Stage 3a: Schema Extraction<br/>(Price/Tax Pydantic Extraction Matrix)"]
+        InvoiceExtract --> ArithAudit["🔢 Stage 4a: Deterministic Arithmetic Audit<br/>(Arithmetic balance validation)"]
+        
+        DocDecision -->|LETTER| LetterExtract["✍️ Stage 3b: Semantic Extraction<br/>(Sender/recipient urgency matrix)"]
+        LetterExtract --> LetterAudit["📊 Stage 4b: Intent Analytics<br/>(Urgency 1-5 metadata check)"]
+        
+        DocDecision -->|UNKNOWN/Error| QuarantineHandler["🚨 Stage 3c: Quarantine Handler<br/>(Catches parsing exceptions)"]
+    end
+
+    %% SRE Async Persistence Threadpool
+    subgraph Persistence ["💾 SRE Asynchronous Persistence & Formatting"]
+        direction TB
+        AsyncOffload["🧵 Starlette BackgroundTasks<br/>(Sync DB/IO thread pool decoupling)"] -->
+        Storage[(💾 localized DuckDB Ledgers<br/>& Quarantine Parquet Lake)]
+        Storage --> GFM["📋 GFM Table Formatter<br/>(Unrolls invoice price arrays to Markdown)"]
+    end
+
+    %% Ingestion audit outputs to Async Persistence
+    ArithAudit -->|Clean Ledger Ingress| AsyncOffload
+    LetterAudit -->|Intent Analytics Payload| AsyncOffload
+    QuarantineHandler -->|Exception Payload| AsyncOffload
+
+    %% Cross-ledger collision auditing
+    Storage -.->|Duplicate check query| ArithAudit
+
+    %% Output Response Egress Flow
+    Cascades -->|API Response JSON| APIGateway
+    GFM -->|Spreadsheet Markdown Table| APIGateway
+    Persistence -->|Success JSON / 400 Bad Request| APIGateway
+
+    %% Apply Styling Classes
+    class Client,PortIsolation,APIGateway,DePoison client;
+    class DeepCopy,Grounding,Stripper,SlidingWindow,TokenEst,AdmissionControl gate;
+    class T1,T2,T3,T4,T5,V1,V2,V3,V4,V5 provider;
+    class PydanticCheck,Classifier,DocDecision,InvoiceExtract,ArithAudit,LetterExtract,LetterAudit,QuarantineHandler engine;
+    class AsyncOffload,Storage,GFM database;
 ```

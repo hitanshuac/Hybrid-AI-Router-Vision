@@ -32,6 +32,8 @@ This document logs every critical failure, its resolution, and its eventual outc
 | 24 | 2026-05-18 | **Router Port Conflict** | Shifted Vision Router from port `8000` to `8001` to resolve collision with legacy text router. | ✅ **Stayed** | Isolated Environments |
 | 25 | 2026-05-18 | **Egress Table Formatting** | Modified `dict_to_markdown_table` to extract nested list-of-dicts (line items) into separate tables. | ✅ **Stayed** | Clean Spreadsheets |
 | 26 | 2026-05-18 | **Telemetry Poisoning** | Added `_should_log_telemetry` guard to prevent Open WebUI auto-titles from poisoning DuckDB latency metrics. | ✅ **Stayed** | Accurate Telemetry |
+| 27 | 2026-05-19 | **Visual Architecture Disconnect** | Redesigned 3D isometric neon system flowchart with full logical interconnectivity and SRE threadpool offloading mapping | ✅ **Stayed** | Stable Baseline v2.6.1 |
+
 ## 🧠 Key Learnings
 1.  **Complexity is a Debt**: Every "Smart" feature (RAG, Semantic Router) adds a failure point. In high-pressure engineering, **Cascading Fallbacks** beat **Complex Classification**.
 2.  **Environment is Fragile**: Git commands can wipe logic faster than you can write it. The `start_all.bat` and `retrospective.md` are the ONLY permanent anchors.
