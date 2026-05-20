@@ -31,7 +31,7 @@ Built with SRE principles at its core, this system is a testament to resilience,
 
 At its heart, the system operates as a dual-engine architecture, each optimized for its specific domain while sharing a common, resilient infrastructure.
 
-![System Architecture](docs/assets/system_architecture.png)
+![System Architecture](docs/assets/system_architecture_v2_7_0.png)
 
 ### 1. 🌐 Gateway Engine (`POST /v1/chat/completions`)
 

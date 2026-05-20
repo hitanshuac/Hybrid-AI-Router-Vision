@@ -33,6 +33,7 @@ This document logs every critical failure, its resolution, and its eventual outc
 | 25 | 2026-05-18 | **Egress Table Formatting** | Modified `dict_to_markdown_table` to extract nested list-of-dicts (line items) into separate tables. | ✅ **Stayed** | Clean Spreadsheets |
 | 26 | 2026-05-18 | **Telemetry Poisoning** | Added `_should_log_telemetry` guard to prevent Open WebUI auto-titles from poisoning DuckDB latency metrics. | ✅ **Stayed** | Accurate Telemetry |
 | 27 | 2026-05-19 | **Visual Architecture Disconnect** | Redesigned 3D isometric neon system flowchart with full logical interconnectivity and SRE threadpool offloading mapping | ✅ **Stayed** | Stable Baseline v2.6.1 |
+| 28 | 2026-05-20 | **Event Loop Blocking via DuckDB/Parquet I/O** | Implemented SRE Compute Separation (`sre_persistence.py`) with `asyncio.to_thread` and process-wide locks; migrated anomalies to DuckDB SQL Silver Layer | ✅ **Stayed** | Stable Baseline v2.7.0 |
 
 ## 🧠 Key Learnings
 1.  **Complexity is a Debt**: Every "Smart" feature (RAG, Semantic Router) adds a failure point. In high-pressure engineering, **Cascading Fallbacks** beat **Complex Classification**.
