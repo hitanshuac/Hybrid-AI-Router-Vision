@@ -32,7 +32,7 @@ Built with SRE principles at its core, this system is a testament to resilience,
 
 At its heart, the system operates as a dual-engine architecture, each optimized for its specific domain while sharing a common, resilient infrastructure.
 
-![System Architecture](docs/assets/system_architecture_v2_7_4.png)
+![System Architecture](docs/assets/system_architecture_v2_7_5.png)
 
 <details>
 <summary>Mermaid Source</summary>
