@@ -40,7 +40,7 @@ To maintain SRE compliance, any new multi-modal endpoint must adhere to the foll
 The pipeline utilizes a 4-stage SRE-grade architecture to process invoices:
 1. **Ingress Validation**: Validates `InvoiceIngress` via Pydantic to catch malformed payloads.
 2. **Vision Extraction**: Processes the Base64 image using Gemini 1.5 Flash natively (with `asyncio.to_thread` for event loop protection).
-3. **Deterministic Anomaly Engine**: Pure Python anomaly checks (Line Item Math, Grand Total Balance, Duplicate Document Detection).
-4. **Persistence & Quarantine**: Valid data is written to DuckDB via `BackgroundTasks` using `INSERT OR REPLACE`. Malformed requests are safely quarantined to Parquet files without blocking the active stream.
+3. **SQL Silver Layer (Medallion Architecture)**: Anomaly detection is implemented in DuckDB SQL views (Silver Layer) for high-performance deterministic checks (Line Item Math, Grand Total Balance, Duplicate Document Detection) and strict CQRS.
+4. **SRE Persistence & DLQ Quarantine**: Valid data is written to DuckDB via an async lock-guarded offloader (`asyncio.to_thread` in `sre_persistence.py`) using `INSERT OR REPLACE`. Malformed requests are safely routed to a daily-partitioned DLQ Parquet file in the `data/quarantine/` directory without blocking the active stream.
 
 **Endpoint**: `POST /api/v1/pipeline/ingest`

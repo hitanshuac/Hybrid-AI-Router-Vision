@@ -8,7 +8,7 @@ This rule governs the data validation layer using Pydantic, focusing on fault to
 
 ## 2. Quarantine Protocol
 - Any record that fails Pydantic validation must be caught and routed to a quarantine file.
-- Save the bad records in a `.parquet` file located within the `data/` directory (e.g., `data/quarantine_YYYYMMDD.parquet`).
+- Save the bad records in a `.parquet` file located within the `data/quarantine/` subdirectory (e.g., `data/quarantine/dlq_YYYYMMDD.parquet`).
 - Include the original payload and the specific validation error message in the quarantine record for manual review.
 
 ## 3. Graceful Degradation

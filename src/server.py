@@ -15,7 +15,7 @@ from src.router import classify_and_route
 from src.health import provider_statuses, stats, health_ping_loop
 from src.schemas import InvoiceIngress, ExtractedInvoice, DocumentType
 from src.vision_client import classify_and_extract_document
-from src.anomaly import analyze_document_anomalies
+from src.sre_persistence import async_write_duckdb_idempotent, async_shunt_to_dlq
 
 logger = logging.getLogger("server")
 
@@ -860,42 +860,43 @@ def _fetch_invoice_history() -> List[str]:
         logger.warning(f"[PIPELINE] Failed to fetch invoice history: {e}")
         return []
 
-def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, flags: list, duration: float):
+async def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, flags: list, duration: float):
     """
-    Offloads telemetry logs to DuckDB using Starlette background worker pool.
-    Enforces rule sql-standards.md: Explicitly use INSERT OR REPLACE for perfect idempotency.
-    Uses a fresh DuckDB connection per background task execution to avoid thread lock contention.
+    Async telemetry writer — acquires the process-wide DuckDB write lock
+    and offloads the INSERT to a worker thread via sre_persistence.
+    Enforces rule sql-standards.md: INSERT OR REPLACE for perfect idempotency.
     """
     try:
-        con = duckdb.connect(_DB_PATH)
         invoice_number = data.get("invoice_number", "UNKNOWN")
         vendor = data.get("vendor_name", "UNKNOWN")
         total = float(data.get("grand_total", 0.0))
         anomaly_notes = json.dumps(flags)
         extracted_json = json.dumps(data)
-        
-        con.execute(
+
+        await async_write_duckdb_idempotent(
+            _DB_PATH,
             """
-            INSERT OR REPLACE INTO invoice_ledger 
+            INSERT OR REPLACE INTO invoice_ledger
             (document_id, invoice_number, vendor_name, grand_total, is_anomaly, flags, extracted_json, latency_sec, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            [doc_id, invoice_number, vendor, total, is_anomaly, anomaly_notes, extracted_json, duration, datetime.datetime.utcnow()]
+            [doc_id, invoice_number, vendor, total, is_anomaly, anomaly_notes, extracted_json, duration, datetime.datetime.utcnow()],
         )
-        con.close()
         logger.info(f"[METRIC COMPACTION] Logged document {doc_id} in {duration:.2f}s. Anomaly Flag: {is_anomaly}")
     except Exception as e:
         logger.error(f"[TELEMETRY] Failed to persist invoice pipeline metrics: {e}")
 
-def persist_letter_telemetry(doc_id: str, data: dict, duration_sec: float):
-    """Fulfills sql-standards.md: Guarantees idempotent writes for semantic records."""
+async def persist_letter_telemetry(doc_id: str, data: dict, duration_sec: float):
+    """Async letter telemetry — lock-guarded, thread-offloaded. Fulfills sql-standards.md."""
     try:
-        with duckdb.connect(_DB_PATH) as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO letter_ledger 
-                (document_id, sender_entity, recipient_entity, subject_line, semantic_intent, urgency_score, latency_sec, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
+        await async_write_duckdb_idempotent(
+            _DB_PATH,
+            """
+            INSERT OR REPLACE INTO letter_ledger
+            (document_id, sender_entity, recipient_entity, subject_line, semantic_intent, urgency_score, latency_sec, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
                 doc_id,
                 data.get("sender_entity"),
                 data.get("recipient_entity"),
@@ -903,29 +904,14 @@ def persist_letter_telemetry(doc_id: str, data: dict, duration_sec: float):
                 data.get("semantic_intent"),
                 data.get("urgency_score"),
                 duration_sec,
-                datetime.datetime.utcnow()
-            ))
+                datetime.datetime.utcnow(),
+            ],
+        )
         logger.info(f"[METRIC COMPACTION] Logged letter {doc_id} in {duration_sec:.2f}s.")
     except Exception as e:
         logger.error(f"[TELEMETRY] Failed to persist letter pipeline metrics: {e}")
 
-def _handle_quarantine_drop(doc_id: str, error_msg: str):
-    logger.error(f"[PIPELINE] Malformed or failed payload. Routing to quarantine. Error: {error_msg}")
-    quarantine_file = f"{_DB_DIR}/quarantine_{datetime.date.today().strftime('%Y%m%d')}.parquet"
-    error_record = pd.DataFrame([{
-        "document_id": doc_id,
-        "timestamp": datetime.datetime.utcnow(),
-        "error_msg": error_msg
-    }])
-    try:
-        if os.path.exists(quarantine_file):
-            existing_df = pd.read_parquet(quarantine_file)
-            updated_df = pd.concat([existing_df, error_record], ignore_index=True)
-            updated_df.to_parquet(quarantine_file)
-        else:
-            error_record.to_parquet(quarantine_file)
-    except Exception as pq_err:
-        logger.error(f"[QUARANTINE] Failed to write quarantine parquet: {pq_err}")
+# _handle_quarantine_drop removed — replaced by async_shunt_to_dlq from sre_persistence.py
 
 @app.post("/api/v1/pipeline/ingest")
 async def ingest_document_payload(payload: InvoiceIngress, background_tasks: BackgroundTasks):
@@ -943,20 +929,17 @@ async def ingest_document_payload(payload: InvoiceIngress, background_tasks: Bac
         
         # Step 2: Adaptive Processing Fork
         if doc_type == DocumentType.INVOICE:
-            historical_keys = _fetch_invoice_history()
-            is_anomaly, anomaly_reports = analyze_document_anomalies(extracted_data, historical_keys)
-            
+            # Anomaly detection is now a read-time concern via vw_silver_invoice_audit
             total_latency_sec = time.perf_counter() - t_start
-            background_tasks.add_task(
-                persist_pipeline_telemetry,
-                payload.document_id, extracted_data, is_anomaly, anomaly_reports, total_latency_sec
+            await persist_pipeline_telemetry(
+                payload.document_id, extracted_data, False, [], total_latency_sec
             )
             
             return {
                 "status": "PROCESSED",
                 "document_classification": doc_type.value,
                 "document_id": payload.document_id,
-                "is_anomaly": is_anomaly,
+                "is_anomaly": "pending_silver_layer_audit",
                 "latency_sec": round(total_latency_sec, 4),
                 "payload": extracted_data
             }
@@ -965,8 +948,7 @@ async def ingest_document_payload(payload: InvoiceIngress, background_tasks: Bac
             # Skip the mathematical balance check entirely (letters don't have subtotals)
             total_latency_sec = time.perf_counter() - t_start
             
-            background_tasks.add_task(
-                persist_letter_telemetry,
+            await persist_letter_telemetry(
                 payload.document_id, extracted_data, total_latency_sec
             )
             
@@ -982,7 +964,7 @@ async def ingest_document_payload(payload: InvoiceIngress, background_tasks: Bac
             
     except Exception as cascade_error:
         total_latency_sec = time.perf_counter() - t_start
-        _handle_quarantine_drop(payload.document_id, str(cascade_error))
+        await async_shunt_to_dlq(_DB_DIR, payload.document_id, str(cascade_error))
         return {
             "status": "QUARANTINED",
             "document_id": payload.document_id,

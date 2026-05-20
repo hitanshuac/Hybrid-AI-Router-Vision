@@ -50,10 +50,10 @@ This specialized engine provides a high-throughput, dual-track document processi
 *   **4-Stage Polymorphic Validation & Ingestion Pipeline:**
     1.  **Stage 1: Layout Classification ([src/vision_client.py](src/vision_client.py)):** Uses `gemini-2.5-flash` to execute zero-shot document layout taxonomy classification, dividing payloads into structured tabular pricing grids (`INVOICE`) or unstructured prose texts (`LETTER`).
     2.  **Stage 2: Target Schema Generation Matrices ([src/vision_client.py](src/vision_client.py)):** Triggers target schema Pydantic extraction models (with strict types and temperature 0.0) mapping either complex invoice tables or letters (sender/recipient details, urgency scores 1-5, and intent analytics).
-    3.  **Stage 3: Adaptive Audits & Analytics ([src/anomaly.py](src/anomaly.py)):** 
-        - **Invoices:** Pass through deterministic mathematical arithmetic audits, checking sub-totals, tax matrices, duplicate IDs, and historical DuckDB ledger collisions.
+    3.  **Stage 3: CQRS Silver Layer Analytics ([data/sql_silver_layer.sql](data/sql_silver_layer.sql)):** 
+        - **Invoices:** Ingested into a Bronze ledger, then audited at read-time via SQL Silver Layer views for deterministic mathematical arithmetic audits (sub-totals, tax matrices, duplicate IDs).
         - **Letters:** Skips numeric calculation loops, routing semantic intent indices directly to Starlette background thread queues.
-    4.  **Stage 4: Starlette Background Thread Offloading & Quarantine:** Any blocking filesystem I/O, parquet writes, or DuckDB updates are delegated to a Starlette background pool, maintaining sub-second user response cycles. Processing failures are auto-routed to daily partitioned quarantine Parquet files.
+    4.  **Stage 4: SRE Async Thread Offloading & DLQ Quarantine ([src/sre_persistence.py](src/sre_persistence.py)):** Any blocking filesystem I/O, parquet writes, or DuckDB updates are strictly serialized and delegated to `asyncio.to_thread` pools with process-wide locks, maintaining sub-second user response cycles. Processing failures are auto-routed to a daily partitioned DLQ Parquet directory.
 
 ---
 
@@ -194,7 +194,7 @@ flowchart TD
         DocDecision{"Document Layout?"}
         
         DocDecision -->|INVOICE| InvoiceExtract["📐 Stage 3a: Schema Extraction<br/>(Price/Tax Pydantic Extraction Matrix)"]
-        InvoiceExtract --> ArithAudit["🔢 Stage 4a: Deterministic Arithmetic Audit<br/>(Arithmetic balance validation)"]
+        InvoiceExtract --> ArithAudit["🔢 Stage 4a: SQL Silver Layer Audit<br/>(CQRS read-time anomaly views)"]
         
         DocDecision -->|LETTER| LetterExtract["✍️ Stage 3b: Semantic Extraction<br/>(Sender/recipient urgency matrix)"]
         LetterExtract --> LetterAudit["📊 Stage 4b: Intent Analytics<br/>(Urgency 1-5 metadata check)"]
@@ -203,10 +203,10 @@ flowchart TD
     end
 
     %% SRE Async Persistence Threadpool
-    subgraph Persistence ["💾 SRE Asynchronous Persistence & Formatting"]
+    subgraph Persistence ["💾 SRE Asynchronous Persistence Layer (sre_persistence.py)"]
         direction TB
-        AsyncOffload["🧵 Starlette BackgroundTasks<br/>(Sync DB/IO thread pool decoupling)"] -->
-        Storage[(💾 localized DuckDB Ledgers<br/>& Quarantine Parquet Lake)]
+        AsyncOffload["🧵 AsyncIO ThreadPool & Locks<br/>(Strict DB/IO thread pool decoupling)"] -->
+        Storage[(💾 localized DuckDB Ledgers<br/>& DLQ Parquet Lake)]
         Storage --> GFM["📋 GFM Table Formatter<br/>(Unrolls invoice price arrays to Markdown)"]
     end
 
