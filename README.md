@@ -32,11 +32,6 @@ Built with SRE principles at its core, this system is a testament to resilience,
 
 At its heart, the system operates as a dual-engine architecture, each optimized for its specific domain while sharing a common, resilient infrastructure.
 
-![System Architecture](docs/assets/system_architecture_v2_7_2.png)
-
-<details>
-<summary>Mermaid Source (Machine-Parseable)</summary>
-
 ```mermaid
 flowchart TD
     classDef client fill:#E0F7FA,stroke:#00ACC1,stroke-width:2px,color:#006064
@@ -128,7 +123,6 @@ flowchart TD
     class AsyncLock,BronzeDB,DLQParquet db
     class ReadOnly,AuditView,LinesView,DupsView,HTMLTable breaker
 ```
-</details>
 
 ### 1. Gateway Engine (`POST /v1/chat/completions`)
 
