@@ -95,6 +95,46 @@ GROUP BY
     la.ingested_at;
 
 
+-- ── Silver Layer: Invoice Line Items View ───────────────────────
+CREATE OR REPLACE VIEW vw_silver_invoice_line_items AS
+WITH parsed AS (
+    SELECT
+        document_id,
+        json_extract_string(raw_json, '$.invoice_number')   AS invoice_number,
+        json_extract_string(raw_json, '$.vendor_name')      AS vendor_name,
+        raw_json
+    FROM bronze_invoice_ledger
+),
+unnested AS (
+    SELECT
+        p.document_id,
+        p.invoice_number,
+        p.vendor_name,
+        CAST(json_extract(li.item, '$.quantity')    AS DOUBLE) AS qty,
+        CAST(json_extract(li.item, '$.unit_price')  AS DOUBLE) AS unit_price,
+        CAST(json_extract(li.item, '$.total_price')  AS DOUBLE) AS printed_line_total,
+        json_extract_string(li.item, '$.item_code')            AS item_code
+    FROM parsed p,
+         LATERAL (
+             SELECT unnest(
+                 from_json(json_extract(p.raw_json, '$.line_items'), '["json"]')
+             ) AS item
+         ) li
+)
+SELECT
+    document_id,
+    vendor_name,
+    invoice_number,
+    item_code,
+    qty,
+    unit_price,
+    printed_line_total,
+    qty * unit_price                              AS computed_line_total,
+    ABS(qty * unit_price - printed_line_total)    AS line_delta,
+    ABS(qty * unit_price - printed_line_total) > 0.01 AS has_line_item_skew
+FROM unnested;
+
+
 -- ── Silver Layer: Duplicate Invoice Detection ─────────────────
 CREATE OR REPLACE VIEW vw_silver_invoice_duplicates AS
 SELECT

@@ -10,8 +10,8 @@ description: Automatically synthesize project logs and push updated documentatio
 
 1. Read the current contents of `retrospective.md`, `walkthrough.md`, and `implementation_plan.md`.
 2. Synthesize these files to write a comprehensive, professional update to `README.md`. Highlight the newest version baseline and any new SRE guardrails.
-3. Generate a high-fidelity system architecture diagram in `docs/assets/` reflecting the new version's layout (Polymorphic Ingestion Engine + Vision Cascade) using the AI image generator tool, naming it with the stable baseline version in the filename (e.g. `docs/assets/system_architecture_v2_6_0.png`) and ensuring it looks visually premium.
-4. Show the proposed `README.md` and generated architecture to the user for approval.
+3. Generate a high-fidelity system architecture diagram directly in `README.md` using Mermaid Markdown (specifically using a clean, vibrant theme). MUST use Mermaid to ensure there are absolute ZERO typos or garbled text that AI image generators usually produce.
+4. Show the proposed `README.md` containing the new architecture to the user for approval.
 5. Once approved, stage the documentation and architecture asset updates. // turbo
 6. Run `git add README.md retrospective.md walkthrough.md docs/assets/system_architecture_v*.png`
 7. Commit the documentation and asset updates. // turbo

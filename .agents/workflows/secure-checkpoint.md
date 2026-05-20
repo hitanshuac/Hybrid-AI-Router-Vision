@@ -6,7 +6,7 @@ description: Automatically commit and push the current workspace state to GitHub
 
 # Secure Checkpoint Workflow
 
-1. Ask the user for a brief commit message describing the current state.
+1. Automatically generate a brief, professional commit message summarizing the recent architectural and codebase changes.
 2. Stage all current files, including hidden and newly recovered files. // turbo
 3. Run `git add .`
 4. Commit the changes safely to the Git ledger. // turbo

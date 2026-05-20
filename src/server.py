@@ -15,7 +15,8 @@ from src.router import classify_and_route
 from src.health import provider_statuses, stats, health_ping_loop
 from src.schemas import InvoiceIngress, ExtractedInvoice, DocumentType
 from src.vision_client import classify_and_extract_document
-from src.sre_persistence import async_write_duckdb_idempotent, async_shunt_to_dlq
+from src.sre_persistence import async_write_duckdb_idempotent, async_shunt_to_dlq, async_get_invoice_audit, async_get_duplicates, async_get_invoice_lines
+from src.circuit_breaker import CircuitBreakerOpenException
 
 logger = logging.getLogger("server")
 
@@ -867,20 +868,16 @@ async def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, 
     Enforces rule sql-standards.md: INSERT OR REPLACE for perfect idempotency.
     """
     try:
-        invoice_number = data.get("invoice_number", "UNKNOWN")
-        vendor = data.get("vendor_name", "UNKNOWN")
-        total = float(data.get("grand_total", 0.0))
-        anomaly_notes = json.dumps(flags)
         extracted_json = json.dumps(data)
 
         await async_write_duckdb_idempotent(
             _DB_PATH,
             """
-            INSERT OR REPLACE INTO invoice_ledger
-            (document_id, invoice_number, vendor_name, grand_total, is_anomaly, flags, extracted_json, latency_sec, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO bronze_invoice_ledger
+            (document_id, raw_json, ingested_at)
+            VALUES (?, ?, ?)
             """,
-            [doc_id, invoice_number, vendor, total, is_anomaly, anomaly_notes, extracted_json, duration, datetime.datetime.utcnow()],
+            [doc_id, extracted_json, datetime.datetime.utcnow()],
         )
         logger.info(f"[METRIC COMPACTION] Logged document {doc_id} in {duration:.2f}s. Anomaly Flag: {is_anomaly}")
     except Exception as e:
@@ -961,7 +958,13 @@ async def ingest_document_payload(payload: InvoiceIngress, background_tasks: Bac
             }
         else:
             raise ValueError(f"Unknown document classification: {doc_type}")
-            
+
+    except CircuitBreakerOpenException as cb_err:
+        # Circuit breaker tripped — do NOT route to DLQ, just reject fast
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Circuit Breaker OPEN. Upstream rate limit exceeded. Cooling down."}
+        )
     except Exception as cascade_error:
         total_latency_sec = time.perf_counter() - t_start
         await async_shunt_to_dlq(_DB_DIR, payload.document_id, str(cascade_error))
@@ -971,3 +974,158 @@ async def ingest_document_payload(payload: InvoiceIngress, background_tasks: Bac
             "reason": str(cascade_error),
             "latency_sec": round(total_latency_sec, 4)
         }
+
+
+from fastapi.encoders import jsonable_encoder
+
+from fastapi.responses import PlainTextResponse
+
+from fastapi.responses import HTMLResponse
+
+import csv
+import io
+from fastapi.responses import StreamingResponse
+
+def _generate_csv_response(results: list, filename: str) -> StreamingResponse:
+    if not results:
+        return PlainTextResponse("No data available")
+    
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=results[0].keys())
+    writer.writeheader()
+    for row in results:
+        # Flatten any complex objects for CSV
+        flat_row = {k: str(v) if not isinstance(v, (str, int, float, bool)) else v for k, v in row.items()}
+        writer.writerow(flat_row)
+        
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}.csv"}
+    )
+
+def _generate_html_table(results: list, title: str, endpoint: str) -> HTMLResponse:
+    if not results:
+        html = f"<html><body style='background:#121220; color:#fff; font-family:sans-serif; padding:2rem;'><h2>{title}</h2><p>No records found.</p></body></html>"
+        return HTMLResponse(content=html)
+        
+    headers = list(results[0].keys())
+    
+    html_parts = [
+        "<html><head><style>",
+        "body { background: #121220; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 2rem; }",
+        "h1 { color: #fff; border-bottom: 2px solid #3b82f6; padding-bottom: 0.5rem; display: inline-block; margin-top: 0; }",
+        ".nav-tabs { display: flex; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }",
+        ".nav-tab { color: #94a3b8; text-decoration: none; padding: 0.5rem 1rem; border-radius: 0.25rem; font-weight: bold; }",
+        ".nav-tab:hover { background: #1e293b; color: #fff; }",
+        ".nav-tab.active { background: #3b82f6; color: white; }",
+        ".toolbar { margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: center; }",
+        ".btn { background: #3b82f6; color: white; padding: 0.5rem 1rem; text-decoration: none; border-radius: 0.25rem; font-weight: bold; border: none; cursor: pointer; }",
+        ".btn:hover { background: #2563eb; }",
+        ".search-input { padding: 0.5rem; border-radius: 0.25rem; border: 1px solid #475569; background: #1e293b; color: white; width: 300px; }",
+        "table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 0.5rem; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5); }",
+        "th { background: #0f172a; padding: 1rem; text-align: left; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #334155; }",
+        "td { padding: 1rem; border-bottom: 1px solid #334155; font-size: 0.875rem; }",
+        "tr:hover { background: #334155; }",
+        "</style></head><body>",
+        "<div class='nav-tabs'>",
+        f"<a href='/api/v1/pipeline/invoices' class='nav-tab {'active' if endpoint == '/api/v1/pipeline/invoices' else ''}'>Invoice Summary</a>",
+        f"<a href='/api/v1/pipeline/invoices/lines' class='nav-tab {'active' if endpoint == '/api/v1/pipeline/invoices/lines' else ''}'>Line Items Detail</a>",
+        f"<a href='/api/v1/pipeline/anomalies/duplicates' class='nav-tab {'active' if endpoint == '/api/v1/pipeline/anomalies/duplicates' else ''}'>Duplicates</a>",
+        "</div>",
+        f"<h1>{title}</h1>",
+        "<div class='toolbar'>",
+        f"<a href='{endpoint}?format=csv' class='btn'>Download CSV</a>",
+        f"<form method='GET' action='{endpoint}' style='margin:0;'><input type='text' name='search_query' class='search-input' placeholder='Search Vendor or Invoice Number...' /><button type='submit' class='btn' style='margin-left:0.5rem;'>Search</button><a href='{endpoint}' class='btn' style='margin-left:0.5rem; background:#64748b;'>Clear</a></form>" if "invoices" in endpoint else "",
+        "</div>",
+        "<table>",
+        "<thead><tr>" + "".join(f"<th>{h.replace('_', ' ')}</th>" for h in headers) + "</tr></thead>",
+        "<tbody>"
+    ]
+    
+    for row in results:
+        html_parts.append("<tr>")
+        for h in headers:
+            val = row.get(h, "")
+            if isinstance(val, bool):
+                val_str = "❌" if not val else "✅"
+            elif not isinstance(val, (str, int, float, bool)):
+                val_str = str(val)
+            else:
+                val_str = str(val)
+            html_parts.append(f"<td>{val_str}</td>")
+        html_parts.append("</tr>")
+        
+    html_parts.extend(["</tbody></table></body></html>"])
+    return HTMLResponse(content="".join(html_parts))
+
+
+# ============================================================
+# CQRS Read Layer — Silver View Endpoints (v2.7.0)
+# ============================================================
+@app.get("/api/v1/pipeline/invoices")
+async def get_invoice_audit(request: Request, document_id: Optional[str] = None, search_query: Optional[str] = None, format: str = "json"):
+    """CQRS read endpoint — queries vw_silver_invoice_audit via read-only DuckDB connection."""
+    results = await async_get_invoice_audit(document_id, search_query)
+    
+    if format.lower() == "csv":
+        return _generate_csv_response(results, "invoice_audit")
+        
+    if format.lower() == "html" or "text/html" in request.headers.get("accept", ""):
+        return _generate_html_table(results, "Invoice Audit Summary", "/api/v1/pipeline/invoices")
+        
+    if format.lower() == "markdown" or "text/markdown" in request.headers.get("accept", ""):
+        md_output = [f"# Invoice Audit Report ({len(results)} records)\n"]
+        for r in results:
+            md_output.append(f"### Document: {r.get('document_id', 'UNKNOWN')}\n")
+            md_output.append(dict_to_markdown_table(r))
+            md_output.append("\n---\n")
+        return PlainTextResponse(content="\n".join(md_output))
+        
+    return JSONResponse(content=jsonable_encoder({"count": len(results), "data": results}))
+
+
+@app.get("/api/v1/pipeline/invoices/lines")
+async def get_invoice_lines(request: Request, document_id: Optional[str] = None, search_query: Optional[str] = None, format: str = "json"):
+    """CQRS read endpoint — queries vw_silver_invoice_line_items via read-only DuckDB connection."""
+    results = await async_get_invoice_lines(document_id, search_query)
+    
+    if format.lower() == "csv":
+        return _generate_csv_response(results, "invoice_lines")
+        
+    if format.lower() == "html" or "text/html" in request.headers.get("accept", ""):
+        return _generate_html_table(results, "Invoice Line Items Detail", "/api/v1/pipeline/invoices/lines")
+        
+    if format.lower() == "markdown" or "text/markdown" in request.headers.get("accept", ""):
+        md_output = [f"# Invoice Lines Report ({len(results)} records)\n"]
+        for r in results:
+            md_output.append(f"### Document: {r.get('document_id', 'UNKNOWN')}\n")
+            md_output.append(dict_to_markdown_table(r))
+            md_output.append("\n---\n")
+        return PlainTextResponse(content="\n".join(md_output))
+        
+    return JSONResponse(content=jsonable_encoder({"count": len(results), "data": results}))
+
+
+@app.get("/api/v1/pipeline/anomalies/duplicates")
+async def get_duplicate_anomalies(request: Request, format: str = "json"):
+    """CQRS read endpoint — queries vw_silver_invoice_duplicates via read-only DuckDB connection."""
+    results = await async_get_duplicates()
+    
+    if format.lower() == "csv":
+        return _generate_csv_response(results, "duplicate_anomalies")
+        
+    if format.lower() == "html" or "text/html" in request.headers.get("accept", ""):
+        return _generate_html_table(results, "Duplicate Anomalies Report", "/api/v1/pipeline/anomalies/duplicates")
+    
+    if format.lower() == "markdown" or "text/markdown" in request.headers.get("accept", ""):
+        md_output = [f"# Duplicate Anomalies Report ({len(results)} records)\n"]
+        for r in results:
+            md_output.append(f"### Invoice Number: {r.get('invoice_number', 'UNKNOWN')}\n")
+            md_output.append(dict_to_markdown_table(r))
+            md_output.append("\n---\n")
+        return PlainTextResponse(content="\n".join(md_output))
+        
+    return JSONResponse(content=jsonable_encoder({"count": len(results), "data": results}))
+
