@@ -15,7 +15,7 @@ from src.router import classify_and_route
 from src.health import provider_statuses, stats, health_ping_loop
 from src.schemas import InvoiceIngress, ExtractedInvoice, DocumentType
 from src.vision_client import classify_and_extract_document
-from src.sre_persistence import async_write_duckdb_idempotent, async_shunt_to_dlq, async_get_invoice_audit, async_get_duplicates, async_get_invoice_lines
+from src.sre_persistence import enqueue_write, enqueue_dlq, async_get_invoice_audit, async_get_duplicates, async_get_invoice_lines, start_writer, stop_writer
 from src.circuit_breaker import CircuitBreakerOpenException
 
 logger = logging.getLogger("server")
@@ -191,8 +191,15 @@ _init_unstructured_ledger()
 # --- STARTUP: Launch background health pings ---
 @app.on_event("startup")
 async def startup_event():
+    await start_writer()
+    logger.info("[SRE] Single-writer actor started.")
     asyncio.create_task(health_ping_loop())
     logger.info("Background health monitor started.")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await stop_writer()
+    logger.info("[SRE] Single-writer actor stopped.")
 
 
 # --- PREMIUM DASHBOARD ---
@@ -870,7 +877,7 @@ async def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, 
     try:
         extracted_json = json.dumps(data)
 
-        await async_write_duckdb_idempotent(
+        enqueue_write(
             _DB_PATH,
             """
             INSERT OR REPLACE INTO bronze_invoice_ledger
@@ -886,7 +893,7 @@ async def persist_pipeline_telemetry(doc_id: str, data: dict, is_anomaly: bool, 
 async def persist_letter_telemetry(doc_id: str, data: dict, duration_sec: float):
     """Async letter telemetry — lock-guarded, thread-offloaded. Fulfills sql-standards.md."""
     try:
-        await async_write_duckdb_idempotent(
+        enqueue_write(
             _DB_PATH,
             """
             INSERT OR REPLACE INTO letter_ledger
@@ -967,7 +974,7 @@ async def ingest_document_payload(payload: InvoiceIngress, background_tasks: Bac
         )
     except Exception as cascade_error:
         total_latency_sec = time.perf_counter() - t_start
-        await async_shunt_to_dlq(_DB_DIR, payload.document_id, str(cascade_error))
+        enqueue_dlq(_DB_DIR, payload.document_id, str(cascade_error))
         return {
             "status": "QUARANTINED",
             "document_id": payload.document_id,

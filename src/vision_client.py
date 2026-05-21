@@ -1,5 +1,5 @@
 """
-Gemini 1.5 Flash Vision Extraction Client.
+Gemini 2.5 Flash Vision Extraction Client.
 
 Converts raw Base64 image payloads into structured JSON using the
 google-generativeai SDK's native multimodal + JSON schema mode.
@@ -7,6 +7,8 @@ google-generativeai SDK's native multimodal + JSON schema mode.
 SRE Safeguard: The synchronous SDK call is wrapped in asyncio.to_thread()
 to keep the ASGI event loop completely unblocked (HANDOVER.md §3).
 """
+
+import re
 
 import os
 import json
@@ -85,7 +87,13 @@ def _sync_pipeline_execution(base64_data: str, api_key: str) -> tuple[DocumentTy
         error_str = str(e).lower()
         # Detect upstream rate limit or service unavailability
         if "429" in error_str or "503" in error_str or "resource exhausted" in error_str or "too many requests" in error_str:
-            vision_circuit_breaker.record_failure()
+            # Parse Retry-After hint from upstream error response (if present)
+            retry_after = None
+            retry_match = re.search(r'retry[\-_ ]?after[:\s]*(\d+)', error_str)
+            if retry_match:
+                retry_after = float(retry_match.group(1))
+                logger.info("[VISION] Parsed Retry-After: %ds", int(retry_after))
+            vision_circuit_breaker.record_failure(retry_after=retry_after)
             logger.warning("[VISION] Upstream rate limit/outage detected: %s", e)
         raise
 
