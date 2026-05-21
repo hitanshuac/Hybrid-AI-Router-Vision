@@ -93,18 +93,10 @@ def compute_layout_hash(base64_data: str) -> str:
 def lookup_cached_layout(db_path: str, layout_hash: str) -> Optional[str]:
     """
     Query DuckDB for a cached document type matching this layout hash.
-    Uses a read_only connection to avoid lock contention with the writer actor.
-
-    Args:
-        db_path: Path to the DuckDB database file.
-        layout_hash: The SHA-256 layout fingerprint.
-
-    Returns:
-        The cached document_type string ('INVOICE' or 'LETTER') if found,
-        or None on cache miss.
     """
     try:
-        con = duckdb.connect(db_path, read_only=True)
+        # Use read_only=False to bypass DuckDB WAL read-only index bugs
+        con = duckdb.connect(db_path, read_only=False)
         try:
             row = con.execute(
                 "SELECT document_type, hit_count FROM layout_hash_cache WHERE layout_hash = ?",

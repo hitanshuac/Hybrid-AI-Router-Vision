@@ -34,6 +34,9 @@ This document logs every critical failure, its resolution, and its eventual outc
 | 26 | 2026-05-18 | **Telemetry Poisoning** | Added `_should_log_telemetry` guard to prevent Open WebUI auto-titles from poisoning DuckDB latency metrics. | ✅ **Stayed** | Accurate Telemetry |
 | 27 | 2026-05-19 | **Visual Architecture Disconnect** | Redesigned 3D isometric neon system flowchart with full logical interconnectivity and SRE threadpool offloading mapping | ✅ **Stayed** | Stable Baseline v2.6.1 |
 | 28 | 2026-05-20 | **Event Loop Blocking via DuckDB/Parquet I/O** | Implemented SRE Compute Separation (`sre_persistence.py`) with `asyncio.to_thread` and process-wide locks; migrated anomalies to DuckDB SQL Silver Layer | ✅ **Stayed** | Stable Baseline v2.7.0 |
+| 29 | 2026-05-21 | **DuckDB WAL Read-Only Concurrency Block** | Removed `read_only=True` from layout cache queries and added checkpoint synchronizations to bypass MVCC index issues | ✅ **Stayed** | Resolved Cache Misses |
+| 30 | 2026-05-21 | **Startup Integrity Verification Gap** | Developed comprehensive `tests/eval_system.py` suite and integrated `--eval` pre-flight gate into `start_all.bat` | ✅ **Stayed** | Baseline v2.8.0 Stable |
+
 
 ## 🧠 Key Learnings
 1.  **Complexity is a Debt**: Every "Smart" feature (RAG, Semantic Router) adds a failure point. In high-pressure engineering, **Cascading Fallbacks** beat **Complex Classification**.

@@ -26,7 +26,7 @@ logger = logging.getLogger("vision_client")
 
 # ── DB Path (for layout cache lookups) ────────────────────────────
 _DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-_DB_PATH = os.path.join(_DB_DIR, "pipeline_metrics.db")
+_DB_PATH = os.environ.get("TEST_DB_PATH", os.path.join(_DB_DIR, "pipeline_metrics.db"))
 
 
 async def classify_and_extract_document(base64_image: str, api_key: str) -> tuple[DocumentType, dict]:

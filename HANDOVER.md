@@ -10,7 +10,7 @@ Our system is engineered to guarantee extremely high throughput, low latency, an
 
 *   **FastAPI (ASGI Core)**: Built for high-concurrency async operations. FastAPI manages the primary gateway API surface, ensuring minimum network overhead and robust request routing.
 *   **DuckDB (Resilient Analytical & Caching Store)**: Integrated as our low-latency, localized storage engine. DuckDB manages semantic caching, request telemetry, and audit logs.
-    *   *SRE Safeguard*: All DuckDB operations are completely decoupled from the main ASGI event loop via dedicated `asyncio.to_thread` pools with a process-wide `asyncio.Lock` to prevent concurrent writer crashes.
+    *   *SRE Safeguard*: Write operations are completely decoupled from the main ASGI event loop via a lock-free background single-writer thread actor using `asyncio.Queue` (O(1) lock contention) to prevent concurrent writer crashes.
 *   **Pydantic (Strict Data Validation)**: Every ingress request and egress response is validated using strict, declarative Pydantic schemas. This prevents downstream type failures and guarantees a highly reliable payload contract.
 
 ---
@@ -29,8 +29,8 @@ The absolute priority for this repository is the seamless processing and routing
 
 To maintain SRE compliance, any new multi-modal endpoint must adhere to the following telemetry standards:
 
-*   **Strict Event-Loop Protection**: Under no circumstances should synchronous filesystem reads/writes or database ingestion tasks block the main asynchronous threads. All blocking I/O is offloaded via `asyncio.to_thread` in `sre_persistence.py`.
-*   **Circuit Breaker Protocol**: A stateful circuit breaker (`circuit_breaker.py`) monitors upstream Vision LLM (Gemini) responses. After 3 consecutive 429/503 failures, the circuit trips OPEN, halts outbound requests for a 60-second cooldown, and triggers a DuckDB WAL checkpoint to secure data state.
+*   **Strict Event-Loop Protection**: Under no circumstances should synchronous filesystem reads/writes or database ingestion tasks block the main asynchronous threads. All blocking writes are offloaded via `asyncio.Queue` in `sre_persistence.py`.
+*   **Circuit Breaker Protocol**: A stateful 3-state circuit breaker (`circuit_breaker.py`) monitors upstream Vision LLM (Gemini) responses. After 3 consecutive 429/503 failures, the circuit trips OPEN, respects `Retry-After` headers for dynamic cooldown, and routes exactly one canary request in HALF_OPEN to safely re-test upstream health before closing the circuit.
 *   **O(1) Content Negotiation**: Dynamic provider health checks and token hydration must be performed through O(1) in-memory or localized caching, avoiding continuous active network/disk polling.
 *   **Telemetry Schemas**: Every multi-modal transaction is persisted into DuckDB with exact latency numbers, token counts, and input/output payload hashes.
 
@@ -38,17 +38,18 @@ To maintain SRE compliance, any new multi-modal endpoint must adhere to the foll
 
 ## 4. Invoice Anomaly Pipeline
 
-The pipeline utilizes a 4-stage SRE-grade architecture to process invoices:
-1. **Ingress Validation**: Validates `InvoiceIngress` via Pydantic to catch malformed payloads.
-2. **Vision Extraction**: Processes the Base64 image using Gemini 2.5 Flash natively (with `asyncio.to_thread` for event loop protection).
-3. **SQL Silver Layer (Medallion Architecture)**: Anomaly detection is implemented in DuckDB SQL views (Silver Layer) for high-performance deterministic checks (Line Item Math, Grand Total Balance, Duplicate Document Detection) and strict CQRS.
-4. **SRE Persistence & DLQ Quarantine**: Valid data is written to DuckDB via an async lock-guarded offloader (`asyncio.to_thread` in `sre_persistence.py`) using `INSERT OR REPLACE`. Malformed requests are safely routed to a daily-partitioned DLQ Parquet file in the `data/quarantine/` directory without blocking the active stream.
+The pipeline utilizes a 5-stage SRE-grade architecture to process invoices:
+1. **Stage 0: Layout Cache Check**: Computes a deterministic SHA-256 structural fingerprint based on text anchors. Bypasses LLM classification entirely on recurring layouts ($0 cost).
+2. **Ingress Validation**: Validates `InvoiceIngress` via Pydantic to catch malformed payloads.
+3. **Vision Extraction**: Processes the Base64 image using Gemini 2.5 Flash natively (with `asyncio.to_thread` for event loop protection) on cache miss.
+4. **SQL Silver Layer (Medallion Architecture)**: Anomaly detection is implemented in DuckDB SQL views (Silver Layer) for high-performance deterministic checks (Line Item Math, Grand Total Balance, Duplicate Document Detection) and strict CQRS.
+5. **SRE Persistence & DLQ Quarantine**: Valid data is enqueued to `asyncio.Queue` (maxsize=1000) and committed to DuckDB lock-free by a background writer thread. Malformed requests are safely routed to a daily-partitioned DLQ Parquet file in the `data/quarantine/` directory.
 
 ---
 
 ## 5. CQRS Read Layer & Silver View Endpoints
 
-The system enforces strict Command Query Responsibility Segregation (CQRS). All read operations use `duckdb.connect(read_only=True)` to eliminate lock contention with the ingestion writer.
+The system enforces strict Command Query Responsibility Segregation (CQRS). Read operations use `duckdb.connect(read_only=False)` connection pooling to bypass WAL MVCC index visibility issues.
 
 ### Endpoints
 
@@ -69,6 +70,5 @@ The system enforces strict Command Query Responsibility Segregation (CQRS). All 
 
 ### SRE Guardrails
 - All DB reads use `asyncio.to_thread` (prevents event loop blocking).
-- All read connections use `read_only=True` (prevents lock contention).
 - All queries enforce `LIMIT 50` (or `LIMIT 200` for line items) to prevent memory overflow.
 - Compound search via `CONCAT(vendor_name, ' ', invoice_number) ILIKE ?` for flexible querying.

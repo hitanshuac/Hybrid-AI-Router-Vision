@@ -3,7 +3,7 @@
 ![Hybrid AI Router Vision Banner](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Baseline](https://img.shields.io/badge/Baseline-v2.7.0-blueviolet)
+![Baseline](https://img.shields.io/badge/Baseline-v2.8.0-blueviolet)
 
 ---
 
@@ -17,12 +17,13 @@ Built with SRE principles at its core, this system is a testament to resilience,
 
 *   **Autonomous Multi-Modal Routing:** Dynamically detects image payloads and intelligently routes to vision-capable models across multiple providers (Groq, OpenRouter, NVIDIA NIM, Gemini, Ollama).
 *   **High-Availability Cascade Fallback:** Implements a robust, real-time fallback mechanism across provider tiers to guarantee service continuity even during external API outages or rate limits.
-*   **Polymorphic Ingestion Engine:** A dynamic 4-stage document ingestion pipeline featuring zero-shot document layout classification (`INVOICE` vs `LETTER`), target schema Pydantic generation matrices, deterministic arithmetic audits, and duplicate/history analytics.
+*   **Zero-Cost Structural Layout Cache (Stage 0):** Computes a deterministic SHA-256 structural fingerprint based on document text anchors. Bypasses LLM classification completely on recurring layouts, saving 100% of LLM classification costs.
+*   **Polymorphic Ingestion Engine (5-Stage):** A dynamic 5-stage pipeline featuring layout cache pre-flight checking, zero-shot layout taxonomy classification, target schema extraction, deterministic SQL audits, and async queue persistence.
 *   **CQRS Silver Layer Analytics:** Strict Command Query Responsibility Segregation with DuckDB SQL Silver Layer views for read-time anomaly detection — line item math validation, grand total balance audits, and duplicate invoice detection — all in pure SQL.
 *   **Invoice Line Items Visibility:** Full unnested line item detail with per-row arithmetic delta checks, compound vendor/invoice search, and CSV export.
-*   **Circuit Breaker Protocol:** A stateful, thread-safe circuit breaker monitors upstream Vision LLM responses. After 3 consecutive 429/503 failures, it trips OPEN, halts outbound requests for a 60-second cooldown, and triggers a DuckDB WAL checkpoint.
-*   **SRE Compute Separation:** All blocking I/O (DuckDB writes, Parquet DLQ dumps, database reads) is offloaded to `asyncio.to_thread` worker pools with process-wide locks, maintaining sub-second user response cycles.
-*   **Advanced Telemetry & Optimization:** Leverages DuckDB for real-time request analytics, context compaction metrics, and efficiency tracking, all within a minimal memory footprint (256MB capped).
+*   **3-State Canary Circuit Breaker:** Stateful circuit breaker guarding upstream Vision LLM requests. It transitions from CLOSED → OPEN after 3 consecutive failures, respects Retry-After header cooldowns, and routes a single canary request in HALF_OPEN to safely re-verify upstream health without thundering herd stampedes.
+*   **SRE Lock-Free Persistence Queue:** All blocking I/O (DuckDB writes, Parquet DLQ dumps, database reads) is decoupled from the main ASGI event loop via an `asyncio.Queue` (maxsize=1000) drained by a single-writer background actor thread, yielding O(1) lock contention.
+*   **Automated Pre-Flight Verification Gate:** Comprehensive unit and integration test suite (`tests/eval_system.py`) integrated as a blocking startup check via `start_all.bat --eval`.
 *   **Adaptive Token Management:** Features an intelligent token estimator with a dynamic `+1024` token proxy for Base64 image data, protecting against silent token inflation.
 *   **Security-First Design:** Strict isolation of API keys within `secrets/*.txt` with standardized loading logic.
 
@@ -32,24 +33,24 @@ Built with SRE principles at its core, this system is a testament to resilience,
 
 At its heart, the system operates as a dual-engine architecture, each optimized for its specific domain while sharing a common, resilient infrastructure.
 
-![System Architecture](docs/assets/system_architecture_v2_7_5.png)
+![System Architecture](docs/assets/system_architecture_v2_8_0.png)
 
 <details>
 <summary>Mermaid Source</summary>
 
 ```mermaid
 flowchart TD
-    classDef client fill:#E0F7FA,stroke:#00ACC1,stroke-width:2px,color:#006064
-    classDef gate fill:#EDE7F6,stroke:#5E35B1,stroke-width:2px,color:#311B92
-    classDef engine fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#1B5E20
-    classDef provider fill:#ECEFF1,stroke:#546E7A,stroke-width:2px,color:#263238
-    classDef db fill:#FFEBEE,stroke:#E53935,stroke-width:2px,color:#B71C1C
-    classDef breaker fill:#FFF3E0,stroke:#FB8C00,stroke-width:2px,color:#E65100
+    classDef client fill:#0A192F,stroke:#00F0FF,stroke-width:2px,color:#00F0FF
+    classDef gate fill:#170F1C,stroke:#B5179E,stroke-width:2px,color:#B5179E
+    classDef engine fill:#0F1C11,stroke:#39FF14,stroke-width:2px,color:#39FF14
+    classDef provider fill:#1E293B,stroke:#F72585,stroke-width:2px,color:#F72585
+    classDef db fill:#1C0A0D,stroke:#FF073A,stroke-width:2px,color:#FF073A
+    classDef breaker fill:#1F190F,stroke:#FF9F1C,stroke-width:2px,color:#FF9F1C
 
-    subgraph Ingress ["Client Ingress"]
+    subgraph Ingress ["Client Ingress Layer"]
         direction TB
         Client["Client Applications"]
-        APIGateway["FastAPI ASGI Core :8001"]
+        APIGateway["FastAPI Core :8001"]
         DePoison["Telemetry De-Poisoner"]
         Client --> APIGateway --> DePoison
     end
@@ -63,70 +64,88 @@ flowchart TD
         Grounding["2. Context Grounding"] -->
         Compaction["3. Sliding Window Compaction"] -->
         TokenEst["4. Token Estimator"] -->
-        CB{"5. Circuit Breaker Check"}
-        CB -->|"Image / Tokens > 4000"| VisionTier["Vision Cascade"]
-        CB -->|"Text Only"| TextTier["Text Cascade"]
+        CB_Check{"5. 3-State Circuit Breaker Check"}
+        
+        CB_Check -->|"CLOSED / HALF_OPEN (Canary)"| RouteCascade{"Route Payload"}
+        CB_Check -->|"OPEN (Blocked)"| FastFail["Fast Fail / Retry-After"]
+        
+        RouteCascade -->|"Image / High Context"| VisionTier["Vision Cascade"]
+        RouteCascade -->|"Text Only"| TextTier["Text Cascade"]
     end
 
     subgraph Cascades ["Dynamic Fallback Tiers"]
         direction LR
         subgraph TextFallback ["Text Cascade"]
-            T1["Groq"] --> T2["OpenRouter"] --> T3["NVIDIA NIM"] --> T4["Gemini"] --> T5["Ollama"]
+            T1["Groq (L3.3)"] --> T2["OpenRouter (G4)"] --> T3["NVIDIA (L3.1)"] --> T4["Gemini (G2.5)"] --> T5["Ollama (G2)"]
         end
         subgraph VisionFallback ["Vision Cascade"]
-            V1["Groq Vision"] --> V2["OpenRouter Vision"] --> V3["NVIDIA Vision"] --> V4["Gemini Vision"] --> V5["Ollama Vision"]
+            V1["Groq Vision (L3.2)"] --> V2["OpenRouter Vision (G2.5)"] --> V3["NVIDIA Vision (L3.2)"] --> V4["Gemini Vision (G2.5)"] --> V5["Ollama Vision (Llava)"]
         end
     end
 
-    subgraph IngestionEngine ["Engine B: Polymorphic Ingestion"]
+    subgraph IngestionEngine ["Engine B: Polymorphic Ingestion Engine"]
         direction TB
         Pydantic["Stage 1: Pydantic Validation"] -->
-        Classifier["Stage 2: Gemini Layout Classifier"] -->
-        DocFork{"Document Type"}
-        DocFork -->|"INVOICE"| InvExtract["Stage 3a: Schema Extraction"]
-        InvExtract --> SilverAudit["Stage 4a: SQL Silver Layer Audit"]
-        DocFork -->|"LETTER"| LetExtract["Stage 3b: Semantic Extraction"]
-        LetExtract --> IntentAudit["Stage 4b: Intent Analytics"]
-        DocFork -->|"ERROR"| DLQ["Stage 3c: DLQ Quarantine"]
+        CacheCheck{"Stage 2: Layout Cache Check"}
+        
+        CacheCheck -->|"Cache HIT ($0 cost)"| DocFork{"Document Type"}
+        CacheCheck -->|"Cache MISS"| Classifier["Stage 3: Gemini Classifier"]
+        Classifier --> DocFork
+        
+        DocFork -->|"INVOICE"| InvExtract["Stage 4a: Schema Extraction"]
+        InvExtract --> SilverAudit["Stage 5a: SQL Silver Layer Audit"]
+        
+        DocFork -->|"LETTER"| LetExtract["Stage 4b: Semantic Extraction"]
+        LetExtract --> IntentAudit["Stage 5b: Intent Analytics"]
+        
+        DocFork -->|"ERROR"| DLQ["Stage 4c: DLQ Quarantine"]
     end
 
-    subgraph Persistence ["SRE Async Persistence Layer"]
+    subgraph Persistence ["SRE Async Persistence Layer (Single-Writer Actor)"]
         direction TB
-        AsyncLock["asyncio.Lock + to_thread"]
+        AsyncQueue["asyncio.Queue (maxsize=1000)"]
+        WriterTask["Background Writer Task"]
         BronzeDB[("Bronze: DuckDB Ledgers")]
         DLQParquet[("DLQ: Parquet Lake")]
-        AsyncLock --> BronzeDB
-        AsyncLock --> DLQParquet
+        
+        AsyncQueue -->|O(1) Drainage| WriterTask
+        WriterTask -->|Atomic Commit| BronzeDB
+        WriterTask -->|Atomic Append| DLQParquet
     end
 
-    subgraph CQRS ["CQRS Read Layer"]
+    subgraph CQRS ["CQRS Read Layer (Analytical)"]
         direction TB
-        ReadOnly["read_only=True Connections"]
+        ReadOnlyConn["duckdb.connect(read_only=False)"]
         AuditView["vw_silver_invoice_audit"]
         LinesView["vw_silver_invoice_line_items"]
         DupsView["vw_silver_invoice_duplicates"]
-        ReadOnly --> AuditView
-        ReadOnly --> LinesView
-        ReadOnly --> DupsView
-        AuditView --> HTMLTable["HTML Table + CSV Export"]
+        
+        ReadOnlyConn --> AuditView
+        ReadOnlyConn --> LinesView
+        ReadOnlyConn --> DupsView
+        
+        AuditView --> HTMLTable["HTML Dashboard + CSV Export"]
         LinesView --> HTMLTable
         DupsView --> HTMLTable
     end
 
-    SilverAudit --> AsyncLock
-    IntentAudit --> AsyncLock
-    DLQ --> AsyncLock
-    BronzeDB -.->|"Silver Views"| ReadOnly
+    SilverAudit -->|Enqueue| AsyncQueue
+    IntentAudit -->|Enqueue| AsyncQueue
+    DLQ -->|Enqueue| AsyncQueue
+    
+    Classifier -.->|Async Cache Store| AsyncQueue
+    
+    BronzeDB -.->|"Silver Views (Read-time)"| ReadOnlyConn
 
     Cascades --> APIGateway
     HTMLTable --> APIGateway
 
     class Client,APIGateway,DePoison client
-    class DeepCopy,Grounding,Compaction,TokenEst,CB gate
+    class DeepCopy,Grounding,Compaction,TokenEst,CB_Check,FastFail,RouteCascade gate
     class T1,T2,T3,T4,T5,V1,V2,V3,V4,V5 provider
-    class Pydantic,Classifier,DocFork,InvExtract,SilverAudit,LetExtract,IntentAudit,DLQ engine
-    class AsyncLock,BronzeDB,DLQParquet db
-    class ReadOnly,AuditView,LinesView,DupsView,HTMLTable breaker
+    class Pydantic,CacheCheck,Classifier,DocFork,InvExtract,SilverAudit,LetExtract,IntentAudit,DLQ engine
+    class AsyncQueue,WriterTask,BronzeDB,DLQParquet db
+    class ReadOnlyConn,AuditView,LinesView,DupsView,HTMLTable breaker
 ```
 </details>
 
@@ -144,11 +163,12 @@ This endpoint serves as the primary multi-modal AI chat interface, intelligently
 ### 2. Polymorphic Ingestion Engine (`POST /api/v1/pipeline/ingest`)
 
 This specialized engine provides a high-throughput, dual-track document processing pipeline that automatically adapts to the incoming document type (supporting invoices, unstructured letters, and correspondence).
-*   **4-Stage Polymorphic Validation & Ingestion Pipeline:**
-    1.  **Stage 1: Layout Classification** — Uses Gemini to execute zero-shot document layout taxonomy classification (`INVOICE` vs `LETTER`).
-    2.  **Stage 2: Target Schema Extraction** — Triggers Pydantic extraction models with strict types and temperature 0.0.
-    3.  **Stage 3: CQRS Silver Layer Analytics** — Ingested into Bronze ledger, then audited at read-time via SQL Silver Layer views.
-    4.  **Stage 4: SRE Async Thread Offloading & DLQ Quarantine** — All blocking I/O is serialized and delegated to `asyncio.to_thread` pools with process-wide locks.
+*   **5-Stage Polymorphic Validation & Ingestion Pipeline:**
+    1.  **Stage 0: Layout Cache pre-flight check** — Computes deterministic structural layout SHA-256 hash. Bypasses LLM classification entirely if confidence match exists.
+    2.  **Stage 1: Layout Classification** — Uses Gemini to execute zero-shot document layout taxonomy classification (`INVOICE` vs `LETTER`) on layout cache MISS.
+    3.  **Stage 2: Target Schema Extraction** — Triggers Pydantic extraction models with strict types and temperature 0.0.
+    4.  **Stage 3: CQRS Silver Layer Analytics** — Ingested into Bronze ledger, then audited at read-time via SQL Silver Layer views.
+    5.  **Stage 4: SRE Async Queue Ingestion & DLQ Quarantine** — All writes enqueued to `asyncio.Queue` and committed lock-free by a background single-writer thread. Failed payloads routed to Parquet DLQ.
 
 ### 3. CQRS Read Layer (Silver View Endpoints)
 

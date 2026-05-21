@@ -26,7 +26,7 @@ logger = logging.getLogger("sre_persistence")
 
 # ── Path Constants ────────────────────────────────────────────────
 _DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-_DB_PATH = os.path.join(_DB_DIR, "pipeline_metrics.db")
+_DB_PATH = os.environ.get("TEST_DB_PATH", os.path.join(_DB_DIR, "pipeline_metrics.db"))
 
 # ── Write Queue Message Types ─────────────────────────────────────
 
@@ -85,7 +85,6 @@ async def _writer_worker() -> None:
                     elif isinstance(remaining, _CheckpointMsg):
                         await asyncio.to_thread(_sync_force_checkpoint)
                     _write_queue.task_done()
-                _write_queue.task_done()
                 logger.info("[SRE] Single-writer actor stopped cleanly.")
                 return
 

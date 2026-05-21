@@ -96,7 +96,7 @@ app = FastAPI(title="Hybrid AI Router Vision API")
 # ============================================================
 _DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 os.makedirs(_DB_DIR, exist_ok=True)
-_DB_PATH = os.path.join(_DB_DIR, "pipeline_metrics.db")
+_DB_PATH = os.environ.get("TEST_DB_PATH", os.path.join(_DB_DIR, "pipeline_metrics.db"))
 
 def _init_metrics_db():
     """Initialize the DuckDB metrics database with WAL mode and memory cap."""
