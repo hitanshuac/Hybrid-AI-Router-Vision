@@ -187,6 +187,10 @@ def _init_unstructured_ledger():
 
 _init_unstructured_ledger()
 
+# Initialize layout cache table (must happen before writer starts)
+from src.layout_cache import init_layout_cache_table
+init_layout_cache_table(_DB_PATH)
+
 
 # --- STARTUP: Launch background health pings ---
 @app.on_event("startup")

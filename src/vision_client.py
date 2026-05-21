@@ -4,12 +4,14 @@ Gemini 2.5 Flash Vision Extraction Client.
 Converts raw Base64 image payloads into structured JSON using the
 google-generativeai SDK's native multimodal + JSON schema mode.
 
+Integrates Structural Layout Cache for zero-cost classification bypass
+on recurring document structures.
+
 SRE Safeguard: The synchronous SDK call is wrapped in asyncio.to_thread()
 to keep the ASGI event loop completely unblocked (HANDOVER.md §3).
 """
 
 import re
-
 import os
 import json
 import asyncio
@@ -18,8 +20,14 @@ from google import generativeai as genai
 
 from src.schemas import ExtractedInvoice, ExtractedLetter, DocumentType
 from src.circuit_breaker import vision_circuit_breaker
+from src.layout_cache import compute_layout_hash, lookup_cached_layout, cache_layout
 
 logger = logging.getLogger("vision_client")
+
+# ── DB Path (for layout cache lookups) ────────────────────────────
+_DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+_DB_PATH = os.path.join(_DB_DIR, "pipeline_metrics.db")
+
 
 async def classify_and_extract_document(base64_image: str, api_key: str) -> tuple[DocumentType, dict]:
     """
@@ -45,19 +53,36 @@ def _sync_pipeline_execution(base64_data: str, api_key: str) -> tuple[DocumentTy
     image_part = {"mime_type": "image/jpeg", "data": base64_data}
     
     try:
-        # Stage 1: Zero-Shot Document Layout Classification
-        classification_prompt = (
-            "Analyze this document image layout. Classify its primary structural taxonomy rules.\n"
-            "Return strictly one word of these choices: 'INVOICE' if it contains pricing vectors, totals, grids;\n"
-            " or 'LETTER' if it represents unstructured text documents, correspondence, or notification prose."
-        )
-        
-        type_response = model.generate_content([classification_prompt, image_part])
-        determined_type = type_response.text.strip().upper()
-        
-        # Normalize structural exceptions safely
-        if determined_type not in [DocumentType.INVOICE, DocumentType.LETTER]:
-            determined_type = DocumentType.UNKNOWN
+        # ── Stage 0: Structural Layout Cache Check ────────────────
+        layout_hash = compute_layout_hash(base64_data)
+        cached_type = lookup_cached_layout(_DB_PATH, layout_hash)
+
+        if cached_type and cached_type in [DocumentType.INVOICE, DocumentType.LETTER]:
+            # CACHE HIT — bypass LLM classification entirely ($0 cost)
+            determined_type = cached_type
+            logger.info(
+                "[VISION] Layout cache HIT — skipping LLM classification. Type: %s",
+                determined_type,
+            )
+        else:
+            # CACHE MISS — proceed to LLM zero-shot classification
+            # Stage 1: Zero-Shot Document Layout Classification
+            classification_prompt = (
+                "Analyze this document image layout. Classify its primary structural taxonomy rules.\n"
+                "Return strictly one word of these choices: 'INVOICE' if it contains pricing vectors, totals, grids;\n"
+                " or 'LETTER' if it represents unstructured text documents, correspondence, or notification prose."
+            )
+            
+            type_response = model.generate_content([classification_prompt, image_part])
+            determined_type = type_response.text.strip().upper()
+            
+            # Normalize structural exceptions safely
+            if determined_type not in [DocumentType.INVOICE, DocumentType.LETTER]:
+                determined_type = DocumentType.UNKNOWN
+
+            # Persist to layout cache for future zero-cost lookups
+            if determined_type in [DocumentType.INVOICE, DocumentType.LETTER]:
+                cache_layout(_DB_PATH, layout_hash, determined_type)
             
         # Stage 2: Target Schema Generation Matrix
         if determined_type == DocumentType.INVOICE:
@@ -96,4 +121,5 @@ def _sync_pipeline_execution(base64_data: str, api_key: str) -> tuple[DocumentTy
             vision_circuit_breaker.record_failure(retry_after=retry_after)
             logger.warning("[VISION] Upstream rate limit/outage detected: %s", e)
         raise
+
 
