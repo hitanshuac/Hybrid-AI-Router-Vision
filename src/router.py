@@ -1,11 +1,141 @@
+"""
+Hybrid AI Router — 9-Tier Cascade Engine (Vision Edition)
+=========================================================
+Strict fallback waterfall using async HTTP clients.
+Integrates SRE Centipede Guardrails (circuit breaker + token preflight).
+Supports dynamic selection of Vision models when multimodal payloads are detected.
+
+v3.0.0 — Offsite Deployment Edition
+"""
+
 import copy
 import logging
-from src.llm_cloud import query_cloud, estimate_tokens_from_messages
+import time
+import httpx
+import asyncio
+from typing import Optional, Tuple, Dict, Any, List
+
+from src.config import (
+    GROQ_API_KEYS, OPENROUTER_API_KEYS, NVIDIA_API_KEYS, GEMINI_API_KEYS
+)
+from src.circuit_breaker import (
+    estimate_tokens_from_messages,
+    get_eligible_tiers,
+    is_circuit_open,
+    record_success,
+    record_failure,
+)
 
 logger = logging.getLogger("router")
 
 # ============================================================
-# EPHEMERAL CONTEXT GROUNDING — v2.3.0
+# TIER DEFINITIONS
+# ============================================================
+TIERS = [
+    {
+        "tier": 1,
+        "name": "Groq/Llama3-70b",
+        "provider": "groq",
+        "model": "llama-3.3-70b-versatile",
+        "vision_model": "llama-3.2-11b-vision-preview",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "timeout": 15,
+        "format": "openai",
+    },
+    {
+        "tier": 2,
+        "name": "Groq/Mixtral",
+        "provider": "groq",
+        "model": "mixtral-8x7b-32768",
+        "vision_model": "llama-3.2-11b-vision-preview",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "timeout": 15,
+        "format": "openai",
+    },
+    {
+        "tier": 3,
+        "name": "AIStudio/Gemini-Flash",
+        "provider": "gemini",
+        "model": "gemini-1.5-flash",
+        "vision_model": "gemini-2.5-flash",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "timeout": 30,
+        "format": "openai",
+    },
+    {
+        "tier": 4,
+        "name": "OpenRouter/Qwen-2.5-Coder",
+        "provider": "openrouter",
+        "model": "qwen/qwen-2.5-coder-32b-instruct:free",
+        "vision_model": "google/gemini-2.5-flash",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "timeout": 20,
+        "format": "openai",
+    },
+    {
+        "tier": 5,
+        "name": "OpenRouter/Llama-3-8B-Free",
+        "provider": "openrouter",
+        "model": "meta-llama/llama-3-8b-instruct:free",
+        "vision_model": "google/gemini-2.5-flash",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "timeout": 20,
+        "format": "openai",
+    },
+    {
+        "tier": 6,
+        "name": "OpenRouter/Phi-3-128k-Free",
+        "provider": "openrouter",
+        "model": "microsoft/phi-3-medium-128k-instruct:free",
+        "vision_model": "google/gemini-2.5-flash",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "timeout": 20,
+        "format": "openai",
+    },
+    {
+        "tier": 7,
+        "name": "NVIDIA-NIM/Llama-3",
+        "provider": "nvidia",
+        "model": "meta/llama-3.1-8b-instruct",
+        "vision_model": "meta/llama-3.2-90b-vision-instruct",
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "timeout": 15,
+        "format": "openai",
+    },
+    {
+        "tier": 8,
+        "name": "NVIDIA-NIM/Mistral-Nemo",
+        "provider": "nvidia",
+        "model": "mistralai/mistral-nemo-12b-instruct",
+        "vision_model": "meta/llama-3.2-90b-vision-instruct",
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "timeout": 15,
+        "format": "openai",
+    },
+    {
+        "tier": 9,
+        "name": "NVIDIA-NIM/Qwen2.5-72B",
+        "provider": "nvidia",
+        "model": "qwen/qwen2.5-72b-instruct",
+        "vision_model": "meta/llama-3.2-90b-vision-instruct",
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "timeout": 15,
+        "format": "openai",
+    }
+]
+
+# ============================================================
+# KEY POOL MAPPING
+# ============================================================
+_KEY_POOL = {
+    "groq": GROQ_API_KEYS,
+    "openrouter": OPENROUTER_API_KEYS,
+    "nvidia": NVIDIA_API_KEYS,
+    "gemini": GEMINI_API_KEYS,
+}
+
+# ============================================================
+# EPHEMERAL CONTEXT GROUNDING — v2.3.0 (preserved)
 # ============================================================
 SYSTEM_GROUNDING_PROMPT = (
     "You are a helpful assistant powered by the Hybrid AI Router. "
@@ -14,12 +144,11 @@ SYSTEM_GROUNDING_PROMPT = (
 )
 
 # ============================================================
-# CONTEXT COMPACTION — v2.4.0
+# CONTEXT COMPACTION — v2.4.0 (preserved)
 # ============================================================
 MAX_WINDOW_SIZE = 10
 
 BOILERPLATE_PREFIXES = [
-    # Longest-first ordering for greedy match
     "I'd be happy to help you with that! ",
     "That's a great question! ",
     "I'd be happy to help! ",
@@ -35,9 +164,7 @@ BOILERPLATE_PREFIXES = [
 
 
 def ground_messages(messages: list) -> list:
-    """
-    Prepend the system grounding prompt at index 0 of a messages array.
-    """
+    """Prepend the system grounding prompt at index 0 of a messages array."""
     system_msg = {"role": "system", "content": SYSTEM_GROUNDING_PROMPT}
     messages.insert(0, system_msg)
     logger.info(f"[CONTEXT GROUNDING] Injected system prompt. Payload now contains {len(messages)} messages.")
@@ -45,10 +172,7 @@ def ground_messages(messages: list) -> list:
 
 
 def strip_boilerplate(messages: list) -> tuple:
-    """
-    Strip verbose AI filler prefixes from role: assistant messages.
-    Returns (messages, strip_count).
-    """
+    """Strip verbose AI filler prefixes from role: assistant messages."""
     strip_count = 0
     for msg in messages:
         if msg.get("role") != "assistant":
@@ -59,24 +183,18 @@ def strip_boilerplate(messages: list) -> tuple:
         for prefix in BOILERPLATE_PREFIXES:
             if content.startswith(prefix):
                 stripped = content[len(prefix):]
-                if stripped:  # Only strip if result is non-empty
+                if stripped:
                     msg["content"] = stripped
                     strip_count += 1
-                break  # Only strip the first (longest) match
+                break
     return messages, strip_count
 
 
 def apply_sliding_window(messages: list, max_window: int = MAX_WINDOW_SIZE) -> tuple:
-    """
-    Enforce a hard cap on outbound message count.
-    Pins the system message at index 0, retains only the most recent (max_window - 1) conversation messages.
-    Returns (messages, drop_count).
-    """
+    """Enforce a hard cap on outbound message count."""
     if len(messages) <= max_window:
         return messages, 0
-
     before_count = len(messages)
-    # Pin system message (index 0), take most recent (max_window - 1) from the rest
     system_msg = messages[0]
     recent = messages[-(max_window - 1):]
     compacted = [system_msg] + recent
@@ -84,10 +202,119 @@ def apply_sliding_window(messages: list, max_window: int = MAX_WINDOW_SIZE) -> t
     return compacted, drop_count
 
 
+# ============================================================
+# ASYNC CASCADE ENGINE — 9-Tier Waterfall
+# ============================================================
+async def _call_openai_format(
+    client: httpx.AsyncClient, tier_def: dict, messages: list, api_key: str, image_data: str = None
+) -> Optional[str]:
+    """Call an OpenAI-compatible endpoint. Returns response text or None."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    
+    # Select model based on whether image_data is present
+    active_model = tier_def.get("vision_model", tier_def["model"]) if image_data else tier_def["model"]
+
+    payload = {"model": active_model, "messages": messages}
+
+    try:
+        resp = await client.post(
+            tier_def["url"],
+            headers=headers,
+            json=payload,
+            timeout=tier_def["timeout"],
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+        else:
+            record_failure(tier_def["tier"], resp.status_code)
+            logger.warning(
+                f"[CASCADE] Tier {tier_def['tier']} ({tier_def['name']}) — HTTP {resp.status_code}"
+            )
+            return None
+    except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
+        logger.warning(f"[CASCADE] Tier {tier_def['tier']} ({tier_def['name']}) — {type(e).__name__}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"[CASCADE] Tier {tier_def['tier']} ({tier_def['name']}) — Unexpected: {e}")
+        return None
+
+
+async def _try_tier(
+    client: httpx.AsyncClient, tier_def: dict, messages: list, image_data: str = None
+) -> Optional[str]:
+    """Attempt a single tier. Handles key rotation for cloud providers."""
+    tier_num = tier_def["tier"]
+    provider = tier_def["provider"]
+
+    # Circuit breaker gate
+    if is_circuit_open(tier_num):
+        logger.info(f"[CASCADE] Tier {tier_num} ({tier_def['name']}) — Circuit OPEN, skipping.")
+        return None
+
+    # OpenAI-format: rotate through available keys
+    keys = _KEY_POOL.get(provider, [])
+    if not keys:
+        logger.debug(f"[CASCADE] Tier {tier_num} ({tier_def['name']}) — No API keys configured, skipping.")
+        return None
+
+    for key in keys:
+        result = await _call_openai_format(client, tier_def, messages, key, image_data)
+        if result:
+            record_success(tier_num)
+            return result
+
+    return None
+
+
+async def cascade_async(messages: list, eligible_tiers: set, image_data: str = None) -> Tuple[Optional[str], str]:
+    """
+    Execute the 9-tier waterfall cascade asynchronously.
+    Returns (response_text, tier_label) or (None, "EXHAUSTED").
+    """
+    async with httpx.AsyncClient() as client:
+        for tier_def in TIERS:
+            if tier_def["tier"] not in eligible_tiers:
+                logger.info(
+                    f"[CASCADE] Tier {tier_def['tier']} ({tier_def['name']}) — "
+                    f"Skipped (not in eligible set)."
+                )
+                continue
+
+            logger.info(f"[CASCADE] Trying Tier {tier_def['tier']}: {tier_def['name']}...")
+            result = await _try_tier(client, tier_def, messages, image_data)
+            if result:
+                logger.info(f"[CASCADE] ✅ Tier {tier_def['tier']} ({tier_def['name']}) responded.")
+                return result, f"T{tier_def['tier']}_{tier_def['name']}"
+
+    return None, "EXHAUSTED"
+
+
+def cascade_sync(messages: list, eligible_tiers: set, image_data: str = None) -> Tuple[Optional[str], str]:
+    """Synchronous wrapper for the async cascade — safe to call from sync code."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        # We're inside an async context (e.g., FastAPI) — create a new thread
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, cascade_async(messages, eligible_tiers, image_data))
+            return future.result(timeout=180)
+    else:
+        return asyncio.run(cascade_async(messages, eligible_tiers, image_data))
+
+
+# ============================================================
+# PUBLIC API — classify_and_route (backward compatible)
+# ============================================================
 def classify_and_route(prompt, image_data=None, messages=None):
     """
-    Routing logic with the v2.4.0 5-step pipeline:
-    1. Deep Copy  2. Grounding  3. Prefix Stripping  4. Sliding Window  5. Cascade
+    Routing logic with the v3.0.0 pipeline:
+    1. Deep Copy  2. Grounding  3. Prefix Stripping  4. Sliding Window
+    5. Preflight Token Check  6. Cascade
 
     Returns (response_text, tier_label, compaction_metrics).
     """
@@ -131,7 +358,7 @@ def classify_and_route(prompt, image_data=None, messages=None):
             ((raw_tokens - compact_tokens) / raw_tokens) * 100, 2
         ) if raw_tokens > 0 else 0.0
 
-        # Observability: log only if compaction actually occurred
+        # Observability
         if messages_dropped > 0 or prefixes_stripped > 0:
             logger.info(
                 f"[CONTEXT COMPACTION] Compacted {before_count} → {len(working)} messages. "
@@ -139,10 +366,25 @@ def classify_and_route(prompt, image_data=None, messages=None):
                 f"Tokens: {raw_tokens} → {compact_tokens} (saved {compaction_metrics['tokens_saved']})"
             )
 
-        # === Step 5: Cascade ===
-        response = query_cloud(messages=working, image_data=image_data)
-        return response, "CLOUD_CASCADE", compaction_metrics
+        # === Step 5: Preflight Token Check (Centipede Guardrail) ===
+        eligible = get_eligible_tiers(compact_tokens)
+
+        # === Step 6: 9-Tier Cascade ===
+        response, tier_label = cascade_sync(working, eligible, image_data)
+
+        if response is None:
+            return (
+                "All 9 tiers exhausted. Check API keys and cloud endpoints.",
+                "ALL_EXHAUSTED",
+                compaction_metrics,
+            )
+
+        return response, tier_label, compaction_metrics
 
     except Exception as e:
-        logger.error(f"Cloud cascade failed: {e}")
-        return "All cloud providers failed. Please check your keys.", "ERROR", compaction_metrics
+        logger.error(f"Cascade failure: {e}")
+        return (
+            "All cloud providers failed. Please check your keys.",
+            "ERROR",
+            compaction_metrics,
+        )

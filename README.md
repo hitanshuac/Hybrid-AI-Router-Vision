@@ -1,9 +1,20 @@
+---
+title: Hybrid AI Router Vision
+emoji: 🧠
+colorFrom: indigo
+colorTo: cyan
+sdk: docker
+app_port: 7860
+pinned: true
+license: mit
+---
+
 # Hybrid-AI-Router-Vision: The Autonomous Multi-Modal AI Gateway
 
 ![Hybrid AI Router Vision Banner](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg)
 ![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Baseline](https://img.shields.io/badge/Baseline-v2.8.0-blueviolet)
+![Baseline](https://img.shields.io/badge/Baseline-v3.0.0-blueviolet)
 
 ---
 
@@ -197,7 +208,6 @@ All read endpoints support compound search via `?search_query=` across vendor na
 
 *   Python 3.10+
 *   `pip` (Python package installer)
-*   `ollama` (required if you plan to utilize local models like `llava:13b`)
 
 ### 1. Clone the Repository
 
@@ -223,8 +233,7 @@ Hybrid-AI-Router-Vision/
 │   ├── groq_api_key.txt
 │   ├── openrouter_api_key.txt
 │   ├── nvidia_api_key.txt
-│   ├── gemini_api_key.txt
-│   └── ollama_host.txt
+│   └── gemini_api_key.txt
 └── requirements.txt
 ```
 
@@ -234,13 +243,20 @@ Hybrid-AI-Router-Vision/
 python -c "import duckdb; con = duckdb.connect('data/pipeline_metrics.db'); con.execute(open('data/sql_silver_layer.sql').read()); print('Silver Layer initialized.')"
 ```
 
-### 5. Run the FastAPI Server
+### 5. Run the Server
 
+**For Server Deployment (Recommended):**
 ```bash
-uvicorn src.server:app --host 0.0.0.0 --port 8001 --reload
+docker-compose up -d --build
+```
+The FastAPI backend and Open WebUI will be automatically orchestrated.
+
+**For Local Testing:**
+```bash
+uvicorn src.server:app --host 0.0.0.0 --port 8001
 ```
 
-The server will now be accessible at `http://localhost:8001`. The interactive Swagger UI can be found at `http://localhost:8001/docs`.
+The server will be accessible at `http://localhost:8001`. The interactive Swagger UI can be found at `http://localhost:8001/docs`.
 
 ### 6. Verification
 

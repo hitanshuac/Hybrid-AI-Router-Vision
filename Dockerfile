@@ -16,9 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application code
 COPY . .
 
-# Health check — verify the Python process is alive
+# Health check — verify the API server is responsive
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "print('healthy')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:7860/health')" || exit 1
 
-# Run the terminal chat (unbuffered via PYTHONUNBUFFERED above)
-CMD ["python", "-m", "src.main"]
+# Run the API Gateway for 24x7 Hugging Face Deployment
+CMD ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "7860"]

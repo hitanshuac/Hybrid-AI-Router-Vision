@@ -10,7 +10,27 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-7s | 
 logger = logging.getLogger("config")
 
 def get_secrets_list(prefix):
+    """
+    Load API keys from:
+      1. Environment variables (HF Spaces / cloud — comma-separated)
+      2. secrets/ directory files (local / docker-compose)
+    """
     keys = []
+
+    # === Source 1: Environment variables ===
+    # e.g., GROQ_API_KEY="key1,key2"  or  GROQ_API_KEY_1="key1"
+    env_name = prefix.upper()
+    env_val = os.environ.get(env_name, "").strip()
+    if env_val:
+        keys.extend([k.strip() for k in env_val.split(",") if k.strip()])
+
+    # Also check numbered variants: GROQ_API_KEY_1, GROQ_API_KEY_2, etc.
+    for i in range(1, 11):
+        env_val = os.environ.get(f"{env_name}_{i}", "").strip()
+        if env_val:
+            keys.append(env_val)
+
+    # === Source 2: secrets/ directory (backward compatible) ===
     try:
         secrets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'secrets')
         if os.path.exists(secrets_dir):
@@ -18,8 +38,11 @@ def get_secrets_list(prefix):
                 if f.startswith(prefix) and f.endswith('.txt'):
                     with open(os.path.join(secrets_dir, f), 'r') as file:
                         key = file.read().strip()
-                        if key: keys.append(key)
-    except: pass
+                        if key and key not in keys:
+                            keys.append(key)
+    except:
+        pass
+
     return keys
 
 def run_startup_checks():
@@ -36,16 +59,10 @@ GEMINI_API_KEYS = get_secrets_list('gemini_api_key')
 PRIMARY_CLOUD_MODEL = "llama-3.3-70b-versatile"
 SECONDARY_CLOUD_MODEL = "google/gemma-4-31b-it:free"
 SAFETY_NET_MODEL = "meta/llama-3.1-8b-instruct"
-GEMINI_MODEL = "gemini-2.5-flash"
-LOCAL_MODEL_PRIMARY = "gemma2:9b"
+# Startup log — show key counts (never values) for observability
+logger.info(
+    f"[CONFIG] Keys loaded — Groq:{len(GROQ_API_KEYS)} "
+    f"OpenRouter:{len(OPENROUTER_API_KEYS)} NVIDIA:{len(NVIDIA_API_KEYS)} "
+    f"Gemini:{len(GEMINI_API_KEYS)}"
+)
 
-# Ollama (Local) Configuration
-OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-LOCAL_TIMEOUT = (5, 120)  # (connect_timeout, read_timeout) in seconds
-MAX_LOCAL_RETRIES = 3
-
-# Telegram Bot
-TELEGRAM_BOT_TOKEN = ""
-_telegram_keys = get_secrets_list("telegram_bot_token")
-if _telegram_keys:
-    TELEGRAM_BOT_TOKEN = _telegram_keys[0]

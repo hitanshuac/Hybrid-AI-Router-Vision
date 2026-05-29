@@ -2,7 +2,7 @@
 
 This document logs every critical failure, its resolution, and its eventual outcome. It is the "Hard Memory" of the project.
 
-## 🔴 Failure Logs (Last 100 Cycles)
+e## 🔴 Failure Logs (Last 100 Cycles)
 
 | ID | Timestamp | Problem | Fix Implemented | Status | Outcome |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -26,21 +26,8 @@ This document logs every critical failure, its resolution, and its eventual outc
 | 18 | 2026-05-17 | **Context Drift (Ungrounded Models)** | Implemented Ephemeral Context Grounding v2.3.0 — system prompt injected at index 0 of every outbound payload | ✅ **Stayed** | Active |
 | 19 | 2026-05-17 | **Token Wastage (Uncompacted Payloads)** | Implemented Context Compaction v2.4.0 — boilerplate stripping, 10-msg sliding window, DuckDB telemetry tracking | ✅ **Stayed** | Active |
 | 20 | 2026-05-17 | **Event Loop Blocking** | Converted `/dashboard` and `/api/v1/metrics/efficiency` endpoints from `async def` to standard `def` to offload synchronous file I/O to Starlette's background threadpool | ✅ **Stayed** | Zero-latency LLM routing restored, 9/9 baseline tests passed |
-| 21 | 2026-05-17 | **Gemini SDK 404 Path Failure** | Stripped `models/` prefix namespace inside the constructor, passing flat model tracking strings. | ✅ **Stayed** | Stable Execution |
-| 22 | 2026-05-17 | **Base64 Token Inflation Bypass** | Decoupled Base64 character loops from calculation engine and applied a fixed `+1024` token weight proxy. | ✅ **Stayed** | Circuit breaker protected |
-| 23 | 2026-05-17 | **Silent Chat Array Flattening** | Intercepted client multi-modal arrays inside `server.py` to forward native structures to OpenAI/Groq standards. | ✅ **Stayed** | Multi-Modal Capable |
-| 24 | 2026-05-18 | **Router Port Conflict** | Shifted Vision Router from port `8000` to `8001` to resolve collision with legacy text router. | ✅ **Stayed** | Isolated Environments |
-| 25 | 2026-05-18 | **Egress Table Formatting** | Modified `dict_to_markdown_table` to extract nested list-of-dicts (line items) into separate tables. | ✅ **Stayed** | Clean Spreadsheets |
-| 26 | 2026-05-18 | **Telemetry Poisoning** | Added `_should_log_telemetry` guard to prevent Open WebUI auto-titles from poisoning DuckDB latency metrics. | ✅ **Stayed** | Accurate Telemetry |
-| 27 | 2026-05-19 | **Visual Architecture Disconnect** | Redesigned 3D isometric neon system flowchart with full logical interconnectivity and SRE threadpool offloading mapping | ✅ **Stayed** | Stable Baseline v2.6.1 |
-| 28 | 2026-05-20 | **Event Loop Blocking via DuckDB/Parquet I/O** | Implemented SRE Compute Separation (`sre_persistence.py`) with `asyncio.to_thread` and process-wide locks; migrated anomalies to DuckDB SQL Silver Layer | ✅ **Stayed** | Stable Baseline v2.7.0 |
-| 29 | 2026-05-21 | **DuckDB WAL Read-Only Concurrency Block** | Removed `read_only=True` from layout cache queries and added checkpoint synchronizations to bypass MVCC index issues | ✅ **Stayed** | Resolved Cache Misses |
-| 30 | 2026-05-21 | **Startup Integrity Verification Gap** | Developed comprehensive `tests/eval_system.py` suite and integrated `--eval` pre-flight gate into `start_all.bat` | ✅ **Stayed** | Baseline v2.8.0 Stable |
-| 31 | 2026-05-21 | **Gemini 503 & Oracle Debt** | Stripped local Ollama, rejected Oracle ARM, committed to 9-Tier Cloud Cascade | ✅ **Stayed** | Pure Cloud Simplicity |
-| 32 | 2026-05-21 | **Webhook Lifecycle Timeout** | Permanently dropped `python-telegram-bot` webhook integration to achieve zero-latency booting | ✅ **Stayed** | Singular SPA Gateway |
-| 33 | 2026-05-23 | **Hugging Face Dockerfile CLI Conflict** | Replaced interactive CLI `src.main` with `uvicorn src.server:app` in Dockerfile on port 7860 | ✅ **Stayed** | 24x7 Deployment Ready |
-| 34 | 2026-05-23 | **Global Exception Leak** | Verified/Added SRE exception handler in `src/server.py` to catch backend crashes and return HTTP 500 JSON | ✅ **Stayed** | Downstream Resiliency |
-
+| 21 | 2026-05-21 | **Gemini 503 & Oracle Debt** | Stripped local Ollama, rjected Oracle ARM, committed to 9-Tier Cloud Cascade | ✅ **Stayed** | Pure Cloud Simplicity |
+| 22 | 2026-05-21 | **Webhook Lifecycle Timeout** | Permanently dropped `python-telegram-bot` webhook integration to achieve zero-latency booting | ✅ **Stayed** | Singular SPA Gateway |
 
 ## 🧠 Key Learnings
 1.  **Complexity is a Debt**: Every "Smart" feature (RAG, Semantic Router) adds a failure point. In high-pressure engineering, **Cascading Fallbacks** beat **Complex Classification**.
@@ -48,9 +35,9 @@ This document logs every critical failure, its resolution, and its eventual outc
 3.  **Vendor Lock-in is Real**: AWS and Gemini can block you instantly. A multi-provider, multi-key rotational pool is the only way to guarantee 99.9% uptime on free tiers.
 4.  **System-Prompt Governance is an SRE Primitive**: Without an enforced grounding message, downstream models produce inconsistent personas across cascade tiers. Ephemeral injection at the router layer is the cheapest, most reliable fix — zero extra latency, zero persistence overhead.
 5.  **Measure Before You Optimize**: Compaction without telemetry is guessing. DuckDB-backed metrics on every request give you the hard data to prove token savings and justify architectural decisions.
-7.  **Guard the Event Loop**: Never run blocking synchronous database or file system calls (like DuckDB file connections) inside an `async def` handler. In high-throughput ASGI environments like FastAPI, synchronous reads will freeze the event loop, causing severe latency spikes and connection resets (WinError 10054). Offload them to background threadpools using standard `def` endpoints.
-8.  **Oracle / Self-Hosting Fallacy**: The overhead of managing an "Always Free" Oracle ARM server for fallback Ollama instances introduces immense maintenance burden and idle-reclamation risks. We explicitly rejected Oracle and completely stripped out local Ollama. Gemini's unprecedented rate limit reductions act as a massive wake-up call that validates this pure-cloud, multi-provider 9-tier router model.
-9.  **Lifecycle Complexity Debt**: Embedding third-party asynchronous event loops (like `python-telegram-bot`'s webhook initializer) inside a primary ASGI server (FastAPI) creates fragile startup sequences that time out in serverless/containerized environments. Dropping the Telegram bot entirely in favor of a singular Web SPA drastically simplifies the architecture and guarantees instant server booting.
+6.  **Guard the Event Loop**: Never run blocking synchronous database or file system calls (like DuckDB file connections) inside an `async def` handler. In high-throughput ASGI environments like FastAPI, synchronous reads will freeze the event loop, causing severe latency spikes and connection resets (WinError 10054). Offload them to background threadpools using standard `def` endpoints.
+7.  **Oracle / Self-Hosting Fallacy**: The overhead of managing an "Always Free" Oracle ARM server for fallback Ollama instances introduces immense maintenance burden and idle-reclamation risks. We explicitly rejected Oracle and completely stripped out local Ollama. Gemini's unprecedented rate limit reductions act as a massive wake-up call that validates this pure-cloud, multi-provider 9-tier router model.
+8.  **Lifecycle Complexity Debt**: Embedding third-party asynchronous event loops (like `python-telegram-bot`'s webhook initializer) inside a primary ASGI server (FastAPI) creates fragile startup sequences that time out in serverless/containerized environments. Dropping the Telegram bot entirely in favor of a singular Web SPA drastically simplifies the architecture and guarantees instant server booting.
 
 
 ---

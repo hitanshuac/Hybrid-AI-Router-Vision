@@ -16,7 +16,7 @@ from src.health import provider_statuses, stats, health_ping_loop
 from src.schemas import InvoiceIngress, ExtractedInvoice, DocumentType
 from src.vision_client import classify_and_extract_document
 from src.sre_persistence import enqueue_write, enqueue_dlq, async_get_invoice_audit, async_get_duplicates, async_get_invoice_lines, start_writer, stop_writer
-from src.circuit_breaker import CircuitBreakerOpenException
+from src.circuit_breaker import CircuitBreakerOpenException, get_circuit_status
 
 logger = logging.getLogger("server")
 
@@ -90,6 +90,16 @@ def _should_log_telemetry(messages: list) -> bool:
     return True
 
 app = FastAPI(title="Hybrid AI Router Vision API")
+
+# --- GLOBAL EXCEPTION HANDLER (SRE Guardrail) ---
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled Exception on {request.url.path}: {exc}", exc_info=False)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal Server Error", "type": "server_error", "message": str(exc)},
+    )
+
 
 # ============================================================
 # DuckDB Telemetry — v2.6.0
@@ -516,7 +526,7 @@ def get_dashboard():
             <div class="header">
                 <div class="status-pill"><span class="dot"></span> System Active</div>
                 <h1>Hybrid AI Router Vision</h1>
-                <p class="subtitle">Polymorphic Vision Engine v2.6.0</p>
+                <p class="subtitle">Polymorphic Vision Engine v3.0.0</p>
             </div>
 
             <div class="refresh-bar"></div>
@@ -612,6 +622,25 @@ def get_dashboard():
     </html>
     """
     return HTMLResponse(content=html_content)
+
+
+@app.get("/v1/models")
+async def get_models():
+    # Return a fallback cached model registry to satisfy Open WebUI upstream validation
+    return JSONResponse(content={
+        "object": "list",
+        "data": [
+            {
+                "id": "hybrid-router",
+                "object": "model",
+                "created": 1686935002,
+                "owned_by": "hybrid-ai",
+                "permission": [],
+                "root": "hybrid-router",
+                "parent": None
+            }
+        ]
+    })
 
 
 class ChatMessage(BaseModel):
@@ -855,6 +884,10 @@ def get_efficiency_metrics(request: Request):
     except Exception as e:
         logger.error(f"[TELEMETRY] Metrics query failed: {e}")
         return JSONResponse(status_code=500, content={"error": f"Metrics unavailable: {e}"})
+
+
+
+
 
 
 # ============================================================
@@ -1139,4 +1172,26 @@ async def get_duplicate_anomalies(request: Request, format: str = "json"):
         return PlainTextResponse(content="\n".join(md_output))
         
     return JSONResponse(content=jsonable_encoder({"count": len(results), "data": results}))
-
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "version": "3.0.0", "mode": "offsite"}
+
+@app.get("/health/providers")
+async def health_providers():
+    """Detailed provider health status for programmatic consumption."""
+    result = {}
+    for pid, ps in provider_statuses.items():
+        result[pid] = {
+            "name": ps.name,
+            "status": ps.status,
+            "latency_ms": ps.latency_ms,
+            "last_checked": ps.last_checked,
+            "error": ps.error,
+        }
+    return result
+
+@app.get("/health/circuits")
+async def health_circuits():
+    """Circuit breaker state for all tiers."""
+    return get_circuit_status()

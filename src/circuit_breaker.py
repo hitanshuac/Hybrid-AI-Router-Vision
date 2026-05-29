@@ -1,208 +1,165 @@
 """
-Circuit Breaker — 3-State Canary System with Adaptive Backoff.
+Hybrid AI Router — SRE Centipede Guardrails
+=============================================
+- O(1) preflight token estimation: len(prompt) // 4
+- Dynamic tier skipping for payloads > 8,000 tokens
+- 3-strike circuit breaker per provider (429/503)
 
-Monitors upstream Vision LLM (Gemini) responses and implements a
-CLOSED → OPEN → HALF_OPEN state machine to prevent thundering herd
-stampedes against free-tier rate limits.
-
-Features:
-  - Retry-After header parsing (respects upstream cooldown hints)
-  - Exponential backoff with decorrelated random jitter (no header fallback)
-  - HALF_OPEN canary gating: only 1 probe request allowed through
-  - DuckDB WAL checkpoint on trip
-
-Implements: .agents/workflows/error-recovery.md
+v3.0.0 — Offsite Deployment Edition
 """
 
 import time
-import random
-import asyncio
 import logging
-import threading
+from dataclasses import dataclass, field
+from typing import Dict, Set
 
 logger = logging.getLogger("circuit_breaker")
 
-# ── Custom Exception ──────────────────────────────────────────────
 class CircuitBreakerOpenException(Exception):
     """Raised when the circuit breaker is OPEN and cooldown has not elapsed."""
     pass
 
+# ============================================================
+# O(1) PRE-FLIGHT TOKEN ESTIMATOR
+# ============================================================
+CENTIPEDE_TOKEN_THRESHOLD = 8_000
 
-# ── Circuit Breaker States ────────────────────────────────────────
-_STATE_CLOSED = "CLOSED"
-_STATE_OPEN = "OPEN"
-_STATE_HALF_OPEN = "HALF_OPEN"
+# Tiers allowed when payload EXCEEDS 8k tokens (high-context capable)
+# Tier 3 = Gemini Flash 1M, Tier 4 = Qwen-2.5-Coder, Tier 6 = Phi-3-128k-Free
+HIGH_CONTEXT_TIERS: Set[int] = {3, 4, 6}
 
-# ── Configuration ─────────────────────────────────────────────────
-_FAILURE_THRESHOLD = 3
-_DEFAULT_COOLDOWN_SECONDS = 60
-_BASE_BACKOFF_SECONDS = 15
-_MAX_BACKOFF_SECONDS = 300  # 5-minute cap
+# All tiers
+ALL_TIERS: Set[int] = set(range(1, 11))
 
 
-class CircuitBreaker:
+def estimate_tokens(prompt: str) -> int:
+    """O(1) pre-flight token estimate — industry standard char/4 heuristic."""
+    return len(prompt) // 4
+
+
+def estimate_tokens_from_messages(messages: list) -> int:
+    """O(n) over message count, O(1) per message — no tokenizer overhead."""
+    total = 0
+    for m in messages:
+        content = m.get("content", "")
+        if isinstance(content, str):
+            total += len(content)
+        elif isinstance(content, list):
+            for part in content:
+                total += len(part.get("text", ""))
+    return total // 4
+
+
+def get_eligible_tiers(est_tokens: int) -> Set[int]:
     """
-    3-State Canary Circuit Breaker for upstream Vision LLM protection.
-
-    State Machine:
-      CLOSED  → (N failures)        → OPEN
-      OPEN    → (cooldown expires)   → HALF_OPEN
-      HALF_OPEN → (canary succeeds)  → CLOSED
-      HALF_OPEN → (canary fails)     → OPEN (with increased backoff)
-
-    Thread-safe via threading.Lock (called from worker threads via to_thread).
+    If the centipede payload exceeds 8,000 tokens, skip tiers 1,2,5,7,8,9,10
+    and route directly to high-context tiers (3, 4, 6).
     """
+    if est_tokens > CENTIPEDE_TOKEN_THRESHOLD:
+        logger.warning(
+            f"[CENTIPEDE GUARDRAIL] Payload ~{est_tokens} tokens exceeds "
+            f"{CENTIPEDE_TOKEN_THRESHOLD} threshold. Restricting to high-context tiers: {sorted(HIGH_CONTEXT_TIERS)}"
+        )
+        return HIGH_CONTEXT_TIERS.copy()
+    return ALL_TIERS.copy()
 
-    def __init__(self):
-        self._lock = threading.Lock()
-        self.failure_count: int = 0
-        self.consecutive_trips: int = 0  # Tracks how many times we've tripped for backoff
-        self.last_failure_time: float = 0.0
-        self.cooldown_seconds: float = _DEFAULT_COOLDOWN_SECONDS
-        self.state: str = _STATE_CLOSED
-        self._canary_in_flight: bool = False
 
-    def record_failure(self, retry_after: float = None) -> None:
-        """
-        Increment failure counter. Trip OPEN at threshold and checkpoint DuckDB.
+# ============================================================
+# 3-STRIKE CIRCUIT BREAKER (per-provider)
+# ============================================================
+STRIKE_LIMIT = 3
+RECOVERY_WINDOW_SEC = 300  # 5 minutes before resetting strikes
 
-        Args:
-            retry_after: Optional cooldown hint from upstream Retry-After header.
-                         If provided, overrides the computed backoff duration.
-        """
-        with self._lock:
-            self.failure_count += 1
-            self.last_failure_time = time.time()
-            logger.warning(
-                "[CIRCUIT BREAKER] Failure %d/%d recorded.",
-                self.failure_count,
-                _FAILURE_THRESHOLD,
-            )
 
-            # If we were in HALF_OPEN and the canary failed, go straight back to OPEN
-            if self.state == _STATE_HALF_OPEN:
-                self._canary_in_flight = False
-                self.consecutive_trips += 1
-                self.cooldown_seconds = self._compute_cooldown(retry_after)
-                self.state = _STATE_OPEN
-                logger.critical(
-                    "[CIRCUIT BREAKER] Canary probe FAILED. Re-tripping OPEN with %ds backoff.",
-                    int(self.cooldown_seconds),
-                )
-                self._trigger_checkpoint()
-                return
+@dataclass
+class CircuitState:
+    """Per-provider circuit breaker state."""
+    strikes: int = 0
+    is_open: bool = False
+    last_failure: float = 0.0
+    last_success: float = 0.0
+    total_trips: int = 0  # lifetime counter for telemetry
 
-            if self.failure_count >= _FAILURE_THRESHOLD and self.state == _STATE_CLOSED:
-                self.consecutive_trips += 1
-                self.cooldown_seconds = self._compute_cooldown(retry_after)
-                self.state = _STATE_OPEN
-                logger.critical(
-                    "[CIRCUIT BREAKER] TRIPPED OPEN — %d consecutive upstream failures. "
-                    "Halting outbound requests for %ds cooldown.",
-                    self.failure_count,
-                    int(self.cooldown_seconds),
-                )
-                self._trigger_checkpoint()
 
-    def record_success(self) -> None:
-        """Reset failure count and consecutive trips on successful upstream response."""
-        with self._lock:
-            was_canary = self.state == _STATE_HALF_OPEN
-            if self.failure_count > 0 or was_canary:
-                logger.info(
-                    "[CIRCUIT BREAKER] %s. Resetting to CLOSED.",
-                    "Canary probe SUCCEEDED" if was_canary else "Success recorded",
-                )
-            self.failure_count = 0
-            self.consecutive_trips = 0
-            self.cooldown_seconds = _DEFAULT_COOLDOWN_SECONDS
-            self.state = _STATE_CLOSED
-            self._canary_in_flight = False
+# Global circuit states keyed by tier number
+_circuits: Dict[int, CircuitState] = {}
 
-    def check_state(self) -> bool:
-        """
-        Gate check before making an upstream request.
 
-        Returns:
-            True  — this is a canary probe (HALF_OPEN). Caller should proceed
-                    with caution and report result.
-            False — normal operation (CLOSED). Caller proceeds normally.
+def _get_circuit(tier: int) -> CircuitState:
+    """Lazily initialize circuit state for a tier."""
+    if tier not in _circuits:
+        _circuits[tier] = CircuitState()
+    return _circuits[tier]
 
-        Raises:
-            CircuitBreakerOpenException — if OPEN and cooldown has not elapsed.
-        """
-        with self._lock:
-            if self.state == _STATE_CLOSED:
-                return False
 
-            if self.state == _STATE_HALF_OPEN:
-                if self._canary_in_flight:
-                    # Another canary is already testing — block this request
-                    raise CircuitBreakerOpenException(
-                        "Circuit Breaker HALF_OPEN. Canary probe in flight. "
-                        "Waiting for probe result."
-                    )
-                # Allow exactly one canary request through
-                self._canary_in_flight = True
-                logger.info("[CIRCUIT BREAKER] HALF_OPEN — releasing single canary probe.")
-                return True
+def is_circuit_open(tier: int) -> bool:
+    """
+    Check if a tier's circuit breaker is OPEN (tripped).
+    Auto-recovers after RECOVERY_WINDOW_SEC of cooldown.
+    """
+    circuit = _get_circuit(tier)
 
-            if self.state == _STATE_OPEN:
-                elapsed = time.time() - self.last_failure_time
-                if elapsed < self.cooldown_seconds:
-                    remaining = self.cooldown_seconds - elapsed
-                    raise CircuitBreakerOpenException(
-                        f"Circuit Breaker OPEN. Upstream rate limit exceeded. "
-                        f"Cooling down ({remaining:.0f}s remaining)."
-                    )
-                else:
-                    # Cooldown expired — transition to HALF_OPEN for canary probe
-                    self.state = _STATE_HALF_OPEN
-                    self._canary_in_flight = True
-                    self.failure_count = 0
-                    logger.info(
-                        "[CIRCUIT BREAKER] Cooldown expired. Transitioning to HALF_OPEN. "
-                        "Releasing single canary probe."
-                    )
-                    return True
-
+    if not circuit.is_open:
         return False
 
-    def _compute_cooldown(self, retry_after: float = None) -> float:
-        """
-        Compute the cooldown duration.
-
-        Priority:
-          1. Upstream Retry-After header (if provided and valid)
-          2. Exponential backoff with decorrelated random jitter
-
-        Backoff formula: min(MAX, base * 2^trips + random(0, base))
-        """
-        if retry_after is not None and retry_after > 0:
-            capped = min(retry_after, _MAX_BACKOFF_SECONDS)
-            logger.info("[CIRCUIT BREAKER] Using upstream Retry-After: %ds", int(capped))
-            return capped
-
-        # Exponential backoff with decorrelated jitter
-        exponential = _BASE_BACKOFF_SECONDS * (2 ** self.consecutive_trips)
-        jitter = random.uniform(0, _BASE_BACKOFF_SECONDS)
-        computed = min(exponential + jitter, _MAX_BACKOFF_SECONDS)
+    # Check if recovery window has elapsed
+    elapsed = time.time() - circuit.last_failure
+    if elapsed >= RECOVERY_WINDOW_SEC:
         logger.info(
-            "[CIRCUIT BREAKER] Computed backoff: %ds (attempt %d, jitter %.1fs)",
-            int(computed),
-            self.consecutive_trips,
-            jitter,
+            f"[CIRCUIT BREAKER] Tier {tier} — Recovery window elapsed "
+            f"({elapsed:.0f}s). Half-opening circuit."
         )
-        return computed
+        circuit.is_open = False
+        circuit.strikes = 0
+        return False
 
-    def _trigger_checkpoint(self) -> None:
-        """Synchronous DuckDB checkpoint — called from within worker threads."""
-        try:
-            from src.sre_persistence import force_checkpoint_sync
-            force_checkpoint_sync()
-        except Exception as e:
-            logger.error("[CIRCUIT BREAKER] Failed to trigger DuckDB checkpoint: %s", e)
+    return True
 
 
-# ── Singleton Instance ────────────────────────────────────────────
-vision_circuit_breaker = CircuitBreaker()
+def record_success(tier: int) -> None:
+    """Record a successful request — resets the strike counter."""
+    circuit = _get_circuit(tier)
+    circuit.strikes = 0
+    circuit.is_open = False
+    circuit.last_success = time.time()
+
+
+def record_failure(tier: int, status_code: int) -> None:
+    """
+    Record a failure. Only 429 (rate limit) and 503 (service unavailable)
+    count as circuit-breaker strikes.
+    """
+    if status_code not in (429, 503):
+        return
+
+    circuit = _get_circuit(tier)
+    circuit.strikes += 1
+    circuit.last_failure = time.time()
+
+    logger.warning(
+        f"[CIRCUIT BREAKER] Tier {tier} — Strike {circuit.strikes}/{STRIKE_LIMIT} "
+        f"(HTTP {status_code})"
+    )
+
+    if circuit.strikes >= STRIKE_LIMIT:
+        circuit.is_open = True
+        circuit.total_trips += 1
+        logger.error(
+            f"[CIRCUIT BREAKER] Tier {tier} — TRIPPED! "
+            f"({circuit.total_trips} lifetime trips). "
+            f"Cooling down for {RECOVERY_WINDOW_SEC}s."
+        )
+
+
+def get_circuit_status() -> Dict[int, dict]:
+    """Return all circuit states for telemetry/dashboard consumption."""
+    return {
+        tier: {
+            "strikes": cs.strikes,
+            "is_open": cs.is_open,
+            "last_failure": cs.last_failure,
+            "last_success": cs.last_success,
+            "total_trips": cs.total_trips,
+        }
+        for tier, cs in _circuits.items()
+    }

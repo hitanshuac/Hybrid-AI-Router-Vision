@@ -39,7 +39,7 @@ src.config.GEMINI_API_KEYS = ["test_key"]
 src.config.GROQ_API_KEYS = ["test_key"]
 
 from src.server import app, startup_event, shutdown_event
-from src.circuit_breaker import vision_circuit_breaker, _STATE_CLOSED, _STATE_OPEN, _STATE_HALF_OPEN, CircuitBreakerOpenException
+from src.circuit_breaker import is_circuit_open, record_success, record_failure, _get_circuit, RECOVERY_WINDOW_SEC, STRIKE_LIMIT
 from src.layout_cache import compute_layout_hash, lookup_cached_layout
 import duckdb
 
@@ -105,7 +105,7 @@ class TestHybridRouterSystem(unittest.TestCase):
             
             # Force a DuckDB checkpoint so read_only=True connections see the new data
             from src.sre_persistence import force_checkpoint
-            force_checkpoint()
+            asyncio.run(force_checkpoint())
             time.sleep(0.5)
             
             # Verify it was written to DuckDB
@@ -119,7 +119,7 @@ class TestHybridRouterSystem(unittest.TestCase):
             # so the DuckDB index is stable for the next point lookup.
             time.sleep(1.0)
             from src.sre_persistence import force_checkpoint
-            force_checkpoint()
+            asyncio.run(force_checkpoint())
             time.sleep(0.5)
 
             # Reset the mock
@@ -137,42 +137,34 @@ class TestHybridRouterSystem(unittest.TestCase):
             print("  ✓ LLM classification bypassed on cache HIT ($0 cost).")
 
     def test_03_circuit_breaker_transitions(self):
-        """Verify the 3-state circuit breaker handles failures, Retry-After, and canary probes."""
-        print("\n[EVAL] Running 3-State Canary Circuit Breaker Test...")
-        # Reset circuit breaker
-        vision_circuit_breaker.record_success()
-        self.assertEqual(vision_circuit_breaker.state, _STATE_CLOSED)
+        """Verify the 3-strike Centipede Guardrail handles failures and recovery."""
+        print("\n[EVAL] Running 3-Strike Centipede Guardrail Test...")
+        # Reset circuit breaker for tier 3
+        record_success(3)
+        self.assertFalse(is_circuit_open(3))
         
-        # 1. Trip the breaker
-        vision_circuit_breaker.record_failure(retry_after=1.0)
-        vision_circuit_breaker.record_failure(retry_after=1.0)
-        vision_circuit_breaker.record_failure(retry_after=1.0)
+        # 1. Trip the breaker (3 strikes = OPEN)
+        record_failure(3, 503)
+        record_failure(3, 429)
+        record_failure(3, 503)
         
-        self.assertEqual(vision_circuit_breaker.state, _STATE_OPEN)
+        self.assertTrue(is_circuit_open(3))
         print("  ✓ Circuit Breaker tripped to OPEN.")
         
-        # 2. Verify requests are blocked
-        with self.assertRaises(CircuitBreakerOpenException):
-            vision_circuit_breaker.check_state()
-            
-        # 3. Wait for cooldown (we mocked Retry-After to 1.0s)
-        time.sleep(1.1)
+        # 2. Mock time to test recovery window
+        circuit = _get_circuit(3)
+        circuit.last_failure = time.time() - RECOVERY_WINDOW_SEC - 1
         
-        # 4. Verify transition to HALF_OPEN (Canary)
-        is_canary = vision_circuit_breaker.check_state()
-        self.assertTrue(is_canary, "First request after cooldown must be flagged as a canary probe")
-        self.assertEqual(vision_circuit_breaker.state, _STATE_HALF_OPEN)
-        print("  ✓ Cooldown expired, transitioned to HALF_OPEN canary state.")
+        # 3. Verify auto-recovery
+        self.assertFalse(is_circuit_open(3))
+        print("  ✓ Cooldown expired, auto-recovered to CLOSED.")
         
-        # 5. Verify thundering herd protection (subsequent requests blocked)
-        with self.assertRaises(CircuitBreakerOpenException):
-            vision_circuit_breaker.check_state()
-        print("  ✓ Thundering herd protection active (subsequent requests blocked).")
-            
-        # 6. Verify success resets to CLOSED
-        vision_circuit_breaker.record_success()
-        self.assertEqual(vision_circuit_breaker.state, _STATE_CLOSED)
-        print("  ✓ Canary success transitioned back to CLOSED.")
+        # 4. Verify success resets strikes
+        record_failure(3, 503)
+        record_success(3)
+        circuit = _get_circuit(3)
+        self.assertEqual(circuit.strikes, 0)
+        print("  ✓ Success resets strike counter.")
 
     def test_04_cqrs_read_layer(self):
         """Verify the CQRS read layer endpoints execute without errors against the test DB."""
