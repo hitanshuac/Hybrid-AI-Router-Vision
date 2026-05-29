@@ -2,7 +2,7 @@
 title: Hybrid AI Router Vision
 emoji: 🧠
 colorFrom: indigo
-colorTo: cyan
+colorTo: blue
 sdk: docker
 app_port: 7860
 pinned: true
