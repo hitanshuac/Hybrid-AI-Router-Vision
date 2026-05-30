@@ -37,9 +37,9 @@ TIERS = [
         "tier": 1,
         "name": "Groq/Llama-3.2-Vision",
         "provider": "groq",
-        "model": "llama-3.2-11b-vision-preview",
+        "model": "llama-3.2-90b-vision-preview",
         "url": "https://api.groq.com/openai/v1/chat/completions",
-        "timeout": 15,
+        "timeout": 30,
         "format": "openai",
     },
     {
@@ -48,7 +48,7 @@ TIERS = [
         "provider": "gemini",
         "model": "gemini-2.5-flash",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "timeout": 30,
+        "timeout": 45,
         "format": "openai",
     },
     {
@@ -57,7 +57,7 @@ TIERS = [
         "provider": "openrouter",
         "model": "google/gemma-4-31b-it:free",
         "url": "https://openrouter.ai/api/v1/chat/completions",
-        "timeout": 20,
+        "timeout": 45,
         "format": "openai",
     },
     {
@@ -66,7 +66,7 @@ TIERS = [
         "provider": "nvidia",
         "model": "meta/llama-3.2-90b-vision-instruct",
         "url": "https://integrate.api.nvidia.com/v1/chat/completions",
-        "timeout": 15,
+        "timeout": 45,
         "format": "openai",
     },
 ]
@@ -161,7 +161,7 @@ async def _call_openai_format(
     # Select model based on whether image_data is present
     active_model = tier_def["model"]  # Every tier IS a vision model — no switching needed
 
-    payload = {"model": active_model, "messages": messages}
+    payload = {"model": active_model, "messages": messages, "max_tokens": 2048}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
 
