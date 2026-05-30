@@ -1,8 +1,8 @@
 """
-Gemini 2.5 Flash Vision Extraction Client.
+Cascade-Based Vision Extraction Client.
 
-Converts raw Base64 image payloads into structured JSON using the
-google-generativeai SDK's native multimodal + JSON schema mode.
+Converts raw Base64 image payloads into structured JSON by routing
+through the centralized 4-Tier Vision Cascade (Groq, Gemini, OpenRouter, NVIDIA).
 
 Integrates Structural Layout Cache for zero-cost classification bypass
 on recurring document structures.
@@ -11,16 +11,15 @@ SRE Safeguard: The synchronous SDK call is wrapped in asyncio.to_thread()
 to keep the ASGI event loop completely unblocked (HANDOVER.md §3).
 """
 
-import re
 import os
 import json
 import asyncio
 import logging
-from google import generativeai as genai
 
 from src.schemas import ExtractedInvoice, ExtractedLetter, DocumentType
-from src.circuit_breaker import is_circuit_open, record_success, record_failure, CircuitBreakerOpenException
+from src.circuit_breaker import CircuitBreakerOpenException
 from src.layout_cache import compute_layout_hash, lookup_cached_layout, cache_layout
+from src.router import cascade_sync
 
 logger = logging.getLogger("vision_client")
 
@@ -28,104 +27,91 @@ logger = logging.getLogger("vision_client")
 _DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 _DB_PATH = os.environ.get("TEST_DB_PATH", os.path.join(_DB_DIR, "pipeline_metrics.db"))
 
-
-async def classify_and_extract_document(base64_image: str, api_key: str) -> tuple[DocumentType, dict]:
+async def classify_and_extract_document(base64_image: str, api_key: str = None) -> tuple[DocumentType, dict]:
     """
     Two-stage execution abstraction wrapper. Classifies incoming asset geometry 
     off the main thread and enforces targeted structural text mappings.
     """
-    return await asyncio.to_thread(_sync_pipeline_execution, base64_image, api_key)
+    return await asyncio.to_thread(_sync_pipeline_execution, base64_image)
 
-def _sync_pipeline_execution(base64_data: str, api_key: str) -> tuple[DocumentType, dict]:
-    # ── Circuit Breaker Gate ──────────────────────────────────────
-    if is_circuit_open(3):
-        raise CircuitBreakerOpenException("Circuit Breaker OPEN. Upstream rate limit exceeded.")
+def _sync_pipeline_execution(base64_data: str) -> tuple[DocumentType, dict]:
+    # Construct the multimodal message format
+    def build_message(prompt: str) -> list:
+        return [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_data}"}}
+                ]
+            }
+        ]
 
-    from src.config import GEMINI_API_KEYS
-    keys_to_try = [api_key] if api_key else GEMINI_API_KEYS
-    
-    if not keys_to_try:
-        raise RuntimeError("No Gemini API key found. Vision extraction unavailable.")
+    # ── Stage 0: Structural Layout Cache Check ────────────────
+    layout_hash = compute_layout_hash(base64_data)
+    cached_type = lookup_cached_layout(_DB_PATH, layout_hash)
+
+    determined_type = DocumentType.UNKNOWN
+
+    if cached_type and cached_type in [DocumentType.INVOICE, DocumentType.LETTER]:
+        # CACHE HIT — bypass LLM classification entirely ($0 cost)
+        determined_type = cached_type
+        logger.info(
+            "[VISION] Layout cache HIT — skipping LLM classification. Type: %s",
+            determined_type,
+        )
+    else:
+        # CACHE MISS — proceed to LLM zero-shot classification via Cascade
+        classification_prompt = (
+            "Analyze this document image layout. Classify its primary structural taxonomy rules.\n"
+            "Return strictly one word of these choices: 'INVOICE' if it contains pricing vectors, totals, grids;\n"
+            " or 'LETTER' if it represents unstructured text documents, correspondence, or notification prose."
+        )
         
-    last_error = None
-    for current_key in keys_to_try:
-        try:
-            genai.configure(api_key=current_key)
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            
-            image_part = {"mime_type": "image/jpeg", "data": base64_data}
-            
-            # ── Stage 0: Structural Layout Cache Check ────────────────
-            layout_hash = compute_layout_hash(base64_data)
-            cached_type = lookup_cached_layout(_DB_PATH, layout_hash)
+        messages = build_message(classification_prompt)
+        response_text, tier = cascade_sync(messages, eligible_tiers=set(range(1, 5)))
+        
+        if not response_text or response_text == "ALL_EXHAUSTED":
+            raise RuntimeError("Vision Cascade exhausted. No providers available for classification.")
 
-            if cached_type and cached_type in [DocumentType.INVOICE, DocumentType.LETTER]:
-                # CACHE HIT — bypass LLM classification entirely ($0 cost)
-                determined_type = cached_type
-                logger.info(
-                    "[VISION] Layout cache HIT — skipping LLM classification. Type: %s",
-                    determined_type,
-                )
-            else:
-                # CACHE MISS — proceed to LLM zero-shot classification
-                # Stage 1: Zero-Shot Document Layout Classification
-                classification_prompt = (
-                    "Analyze this document image layout. Classify its primary structural taxonomy rules.\n"
-                    "Return strictly one word of these choices: 'INVOICE' if it contains pricing vectors, totals, grids;\n"
-                    " or 'LETTER' if it represents unstructured text documents, correspondence, or notification prose."
-                )
-                
-                type_response = model.generate_content([classification_prompt, image_part])
-                determined_type = type_response.text.strip().upper()
-                
-                # Normalize structural exceptions safely
-                if determined_type not in [DocumentType.INVOICE, DocumentType.LETTER]:
-                    determined_type = DocumentType.UNKNOWN
+        determined_type = response_text.strip().upper()
+        
+        # Normalize structural exceptions safely
+        if determined_type not in [DocumentType.INVOICE, DocumentType.LETTER]:
+            determined_type = DocumentType.UNKNOWN
 
-                # Persist to layout cache for future zero-cost lookups
-                if determined_type in [DocumentType.INVOICE, DocumentType.LETTER]:
-                    cache_layout(_DB_PATH, layout_hash, determined_type)
-                
-            # Stage 2: Target Schema Generation Matrix
-            if determined_type == DocumentType.INVOICE:
-                extraction_prompt = "Extract accounting details accurately per data definition targets."
-                target_schema = ExtractedInvoice
-            elif determined_type == DocumentType.LETTER:
-                extraction_prompt = "Perform semantic prose extraction, tracking entities, intent metrics, and text arrays."
-                target_schema = ExtractedLetter
-            else:
-                raise ValueError(f"Document categorization execution failure. Unrecognized taxonomy framework.")
+        # Persist to layout cache for future zero-cost lookups
+        if determined_type in [DocumentType.INVOICE, DocumentType.LETTER]:
+            cache_layout(_DB_PATH, layout_hash, determined_type)
 
-            # Stage 3: Direct JSON Extraction
-            extraction_response = model.generate_content(
-                contents=[extraction_prompt, image_part],
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json",
-                    response_schema=target_schema,
-                    temperature=0.0
-                )
-            )
-            
-            # ── Success: Reset circuit breaker ────────────────────────
-            record_success(3)
-            return DocumentType(determined_type), json.loads(extraction_response.text)
-            
-        except Exception as e:
-            last_error = e
-            error_str = str(e).lower()
-            
-            # Detect upstream rate limit or service unavailability
-            if "429" in error_str or "503" in error_str or "resource" in error_str or "too many" in error_str:
-                status_code = 429 if "429" in error_str or "resource" in error_str or "too many" in error_str else 503
-                record_failure(3, status_code)
-                logger.warning(f"[VISION] Upstream rate limit/outage with current key: {e}")
-            else:
-                logger.warning(f"[VISION] Error with current key: {e}")
-            
-            # If it's the last key, we raise the error
-            continue
+    # ── Stage 2: Target Schema Generation Matrix ────────────────
+    if determined_type == DocumentType.INVOICE:
+        schema_json = json.dumps(ExtractedInvoice.model_json_schema())
+        extraction_prompt = (
+            "Extract accounting details accurately per data definition targets. "
+            f"You MUST return valid JSON matching this exact schema: {schema_json}"
+        )
+    elif determined_type == DocumentType.LETTER:
+        schema_json = json.dumps(ExtractedLetter.model_json_schema())
+        extraction_prompt = (
+            "Perform semantic prose extraction, tracking entities, intent metrics, and text arrays. "
+            f"You MUST return valid JSON matching this exact schema: {schema_json}"
+        )
+    else:
+        raise ValueError(f"Document categorization execution failure. Unrecognized taxonomy framework: {determined_type}")
 
-    # If all keys failed, raise the final exception
-    raise last_error
+    # ── Stage 3: Direct JSON Extraction via Cascade ────────────────
+    messages = build_message(extraction_prompt)
+    response_text, tier = cascade_sync(messages, eligible_tiers=set(range(1, 5)), json_mode=True)
+    
+    if not response_text or response_text == "ALL_EXHAUSTED":
+        raise RuntimeError("Vision Cascade exhausted. No providers available for JSON extraction.")
+
+    try:
+        extracted_data = json.loads(response_text)
+        return DocumentType(determined_type), extracted_data
+    except json.JSONDecodeError as e:
+        logger.error(f"[VISION] Failed to parse JSON from tier {tier}: {response_text}")
+        raise RuntimeError(f"Vision model returned invalid JSON: {str(e)}")
 
 

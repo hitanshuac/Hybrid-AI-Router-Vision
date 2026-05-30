@@ -75,14 +75,13 @@ class TestHybridRouterSystem(unittest.TestCase):
         self.assertTrue(len(hash1) == 64, "Must be a SHA-256 hash")
         print("  ✓ Deterministic SHA-256 hashing passed.")
 
-    @patch("src.vision_client.genai.GenerativeModel.generate_content")
-    def test_02_layout_cache_hit_bypass(self, mock_generate):
+    @patch("src.vision_client.cascade_sync")
+    def test_02_layout_cache_hit_bypass(self, mock_cascade_sync):
         """Verify the pipeline bypasses the LLM on a layout cache hit."""
         print("\n[EVAL] Running Zero-Cost Classification Bypass Test...")
-        # Setup mock LLM response for the initial MISS
-        mock_response = MagicMock()
-        mock_response.text = "INVOICE"
-        mock_generate.return_value = mock_response
+        # Setup mock Cascade response for the initial MISS
+        # cascade_sync returns (response_text, tier)
+        mock_cascade_sync.return_value = ("INVOICE", "T1_MockProvider")
 
         text = "Invoice No: 999\nVendor: EvalCorp\nGrand Total: 1000\nTax: 100"
         b64_img = base64.b64encode(text.encode('utf-8')).decode('utf-8')
@@ -123,7 +122,7 @@ class TestHybridRouterSystem(unittest.TestCase):
             time.sleep(0.5)
 
             # Reset the mock
-            mock_generate.reset_mock()
+            mock_cascade_sync.reset_mock()
             
             # Second pass - Cache HIT
             try:
@@ -131,9 +130,9 @@ class TestHybridRouterSystem(unittest.TestCase):
             except Exception:
                 pass
                 
-            # Ensure generate_content was NOT called for classification because of the cache hit
+            # Ensure cascade_sync was NOT called for classification because of the cache hit
             # (It will be called for extraction, so call count should be 1, not 2)
-            self.assertEqual(mock_generate.call_count, 1, "LLM classification must be bypassed on HIT")
+            self.assertEqual(mock_cascade_sync.call_count, 1, "LLM classification must be bypassed on HIT")
             print("  ✓ LLM classification bypassed on cache HIT ($0 cost).")
 
     def test_03_circuit_breaker_transitions(self):

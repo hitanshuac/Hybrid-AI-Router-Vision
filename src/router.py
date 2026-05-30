@@ -153,7 +153,7 @@ def apply_sliding_window(messages: list, max_window: int = MAX_WINDOW_SIZE) -> t
 # ASYNC CASCADE ENGINE — 9-Tier Waterfall
 # ============================================================
 async def _call_openai_format(
-    client: httpx.AsyncClient, tier_def: dict, messages: list, api_key: str, image_data: str = None
+    client: httpx.AsyncClient, tier_def: dict, messages: list, api_key: str, image_data: str = None, json_mode: bool = False
 ) -> Optional[str]:
     """Call an OpenAI-compatible endpoint. Returns response text or None."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -162,6 +162,8 @@ async def _call_openai_format(
     active_model = tier_def["model"]  # Every tier IS a vision model — no switching needed
 
     payload = {"model": active_model, "messages": messages}
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
 
     try:
         resp = await client.post(
@@ -188,7 +190,7 @@ async def _call_openai_format(
 
 
 async def _try_tier(
-    client: httpx.AsyncClient, tier_def: dict, messages: list, image_data: str = None
+    client: httpx.AsyncClient, tier_def: dict, messages: list, image_data: str = None, json_mode: bool = False
 ) -> Optional[str]:
     """Attempt a single tier. Handles key rotation for cloud providers."""
     tier_num = tier_def["tier"]
@@ -206,7 +208,7 @@ async def _try_tier(
         return None
 
     for key in keys:
-        result = await _call_openai_format(client, tier_def, messages, key, image_data)
+        result = await _call_openai_format(client, tier_def, messages, key, image_data, json_mode)
         if result:
             record_success(tier_num)
             return result
@@ -214,7 +216,7 @@ async def _try_tier(
     return None
 
 
-async def cascade_async(messages: list, eligible_tiers: set, image_data: str = None) -> Tuple[Optional[str], str]:
+async def cascade_async(messages: list, eligible_tiers: set, image_data: str = None, json_mode: bool = False) -> Tuple[Optional[str], str]:
     """
     Execute the 9-tier waterfall cascade asynchronously.
     Returns (response_text, tier_label) or (None, "EXHAUSTED").
@@ -229,7 +231,7 @@ async def cascade_async(messages: list, eligible_tiers: set, image_data: str = N
                 continue
 
             logger.info(f"[CASCADE] Trying Tier {tier_def['tier']}: {tier_def['name']}...")
-            result = await _try_tier(client, tier_def, messages, image_data)
+            result = await _try_tier(client, tier_def, messages, image_data, json_mode)
             if result:
                 logger.info(f"[CASCADE] ✅ Tier {tier_def['tier']} ({tier_def['name']}) responded.")
                 return result, f"T{tier_def['tier']}_{tier_def['name']}"
@@ -237,7 +239,7 @@ async def cascade_async(messages: list, eligible_tiers: set, image_data: str = N
     return None, "EXHAUSTED"
 
 
-def cascade_sync(messages: list, eligible_tiers: set, image_data: str = None) -> Tuple[Optional[str], str]:
+def cascade_sync(messages: list, eligible_tiers: set, image_data: str = None, json_mode: bool = False) -> Tuple[Optional[str], str]:
     """Synchronous wrapper for the async cascade — safe to call from sync code."""
     try:
         loop = asyncio.get_running_loop()
@@ -248,10 +250,11 @@ def cascade_sync(messages: list, eligible_tiers: set, image_data: str = None) ->
         # We're inside an async context (e.g., FastAPI) — create a new thread
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(asyncio.run, cascade_async(messages, eligible_tiers, image_data))
-            return future.result(timeout=180)
+            future = pool.submit(asyncio.run, cascade_async(messages, eligible_tiers, image_data, json_mode))
+            return future.result()
     else:
-        return asyncio.run(cascade_async(messages, eligible_tiers, image_data))
+        # No running loop, just use asyncio.run directly
+        return asyncio.run(cascade_async(messages, eligible_tiers, image_data, json_mode))
 
 
 # ============================================================
