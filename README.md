@@ -165,11 +165,10 @@ flowchart TD
 This endpoint serves as the primary multi-modal AI chat interface, intelligently routing incoming requests to the most suitable LLM provider and model.
 *   **Dynamic Vision Cascade Fallback Network:**
     The moment `image_data` is detected within an OpenAI-style payload, the gateway dynamically switches from text-only models to a dedicated Vision Tier. This cascade ensures high availability and cost optimization by attempting providers in a predefined order:
-    1.  **Groq Engine:** `llama-3.2-11b-vision-preview`
-    2.  **OpenRouter Engine:** `google/gemini-2.5-flash`
-    3.  **NVIDIA NIM:** `meta/llama-3.2-90b-vision-instruct`
-    4.  **Gemini Engine:** `gemini-2.5-flash`
-    5.  **Ollama Local:** `llava:13b`
+    1.  **Groq Engine:** `llama-3.2-11b-vision-preview` (When available)
+    2.  **Gemini Tier:** `gemini-2.5-flash`
+    3.  **OpenRouter Free Tier:** `openrouter/free` (Auto-routing to any available free vision model)
+    4.  **NVIDIA NIM:** `meta/llama-3.2-90b-vision-instruct`
 
 ### 2. Polymorphic Ingestion Engine (`POST /api/v1/pipeline/ingest`)
 

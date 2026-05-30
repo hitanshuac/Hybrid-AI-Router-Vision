@@ -40,8 +40,8 @@ def get_secrets_list(prefix):
                         key = file.read().strip()
                         if key and key not in keys:
                             keys.append(key)
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"[CONFIG] Failed to load secrets from directory: {e}")
 
     return keys
 

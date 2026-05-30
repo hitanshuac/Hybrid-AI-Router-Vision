@@ -16,9 +16,7 @@ import httpx
 import asyncio
 from typing import Optional, Tuple, Dict, Any, List
 
-from src.config import (
-    GROQ_API_KEYS, OPENROUTER_API_KEYS, NVIDIA_API_KEYS, GEMINI_API_KEYS
-)
+from src.config import get_secrets_list
 from src.circuit_breaker import (
     estimate_tokens_from_messages,
     get_eligible_tiers,
@@ -53,9 +51,9 @@ TIERS = [
     },
     {
         "tier": 3,
-        "name": "OpenRouter/Gemma-4-Vision",
+        "name": "OpenRouter/Free-Vision-Router",
         "provider": "openrouter",
-        "model": "google/gemma-4-31b-it:free",
+        "model": "openrouter/free",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "timeout": 45,
         "format": "openai",
@@ -72,14 +70,8 @@ TIERS = [
 ]
 
 # ============================================================
-# KEY POOL MAPPING
+# KEY POOL MAPPING (Dynamic Loading via get_secrets_list)
 # ============================================================
-_KEY_POOL = {
-    "groq": GROQ_API_KEYS,
-    "openrouter": OPENROUTER_API_KEYS,
-    "nvidia": NVIDIA_API_KEYS,
-    "gemini": GEMINI_API_KEYS,
-}
 
 # ============================================================
 # EPHEMERAL CONTEXT GROUNDING — v2.3.0 (preserved)
@@ -202,8 +194,8 @@ async def _try_tier(
         logger.info(f"[CASCADE] Tier {tier_num} ({tier_def['name']}) — Circuit OPEN, skipping.")
         return None, "Circuit Open"
 
-    # OpenAI-format: rotate through available keys
-    keys = _KEY_POOL.get(provider, [])
+    # OpenAI-format: dynamically fetch keys for provider
+    keys = get_secrets_list(f"{provider}_api_key")
     if not keys:
         logger.debug(f"[CASCADE] Tier {tier_num} ({tier_def['name']}) — No API keys configured, skipping.")
         return None, "No API Key"

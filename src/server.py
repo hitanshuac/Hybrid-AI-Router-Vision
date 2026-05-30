@@ -631,12 +631,12 @@ async def get_models():
         "object": "list",
         "data": [
             {
-                "id": "hybrid-router",
+                "id": "hybrid-router-vision",
                 "object": "model",
                 "created": 1686935002,
                 "owned_by": "hybrid-ai",
                 "permission": [],
-                "root": "hybrid-router",
+                "root": "hybrid-router-vision",
                 "parent": None
             }
         ]
@@ -785,7 +785,7 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
         "id": f"chatcmpl-{int(time.time())}",
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": "hybrid-router",
+        "model": "hybrid-router-vision",
         "choices": [
             {
                 "index": 0,
@@ -806,12 +806,7 @@ async def chat_completions(request: ChatCompletionRequest, background_tasks: Bac
     logger.info(f"API Request completed in {elapsed:.1f}s -> {tag}")
     return response_json
 
-@app.get("/v1/models")
-async def get_models():
-    return {
-        "object": "list",
-        "data": [{"id": "hybrid-router", "object": "model", "created": int(time.time()), "owned_by": "antigravity"}]
-    }
+
 
 @app.get("/health")
 async def health_check():
