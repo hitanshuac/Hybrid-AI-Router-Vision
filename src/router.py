@@ -55,7 +55,7 @@ TIERS = [
         "tier": 3,
         "name": "OpenRouter/Gemma-4-Vision",
         "provider": "openrouter",
-        "model": "google/gemma-4-31b-it:free",
+        "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "timeout": 45,
         "format": "openai",
@@ -162,8 +162,9 @@ async def _call_openai_format(
     active_model = tier_def["model"]  # Every tier IS a vision model — no switching needed
 
     payload = {"model": active_model, "messages": messages, "max_tokens": 2048}
-    if json_mode:
-        payload["response_format"] = {"type": "json_object"}
+    # Removed strict response_format={"type": "json_object"} as it causes 
+    # timeouts and 400 Bad Requests on non-OpenAI vision models (e.g., NVIDIA NIM).
+    # The prompt explicitly instructs JSON output anyway.
 
     try:
         resp = await client.post(
