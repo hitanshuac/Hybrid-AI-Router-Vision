@@ -154,8 +154,8 @@ def apply_sliding_window(messages: list, max_window: int = MAX_WINDOW_SIZE) -> t
 # ============================================================
 async def _call_openai_format(
     client: httpx.AsyncClient, tier_def: dict, messages: list, api_key: str, image_data: str = None, json_mode: bool = False
-) -> Optional[str]:
-    """Call an OpenAI-compatible endpoint. Returns response text or None."""
+) -> Tuple[Optional[str], Optional[str]]:
+    """Call an OpenAI-compatible endpoint. Returns (response_text, error_reason)."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     
     # Select model based on whether image_data is present
@@ -175,46 +175,49 @@ async def _call_openai_format(
         )
         if resp.status_code == 200:
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            return data["choices"][0]["message"]["content"], None
         else:
             record_failure(tier_def["tier"], resp.status_code)
             logger.warning(
-                f"[CASCADE] Tier {tier_def['tier']} ({tier_def['name']}) — HTTP {resp.status_code}"
+                f"[CASCADE] Tier {tier_def['tier']} ({tier_def['name']}) — HTTP {resp.status_code}: {resp.text}"
             )
-            return None
+            return None, f"HTTP {resp.status_code}"
     except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError) as e:
         logger.warning(f"[CASCADE] Tier {tier_def['tier']} ({tier_def['name']}) — {type(e).__name__}: {e}")
-        return None
+        return None, f"{type(e).__name__}"
     except Exception as e:
         logger.error(f"[CASCADE] Tier {tier_def['tier']} ({tier_def['name']}) — Unexpected: {e}")
-        return None
+        return None, "Error"
 
 
 async def _try_tier(
     client: httpx.AsyncClient, tier_def: dict, messages: list, image_data: str = None, json_mode: bool = False
-) -> Optional[str]:
-    """Attempt a single tier. Handles key rotation for cloud providers."""
+) -> Tuple[Optional[str], Optional[str]]:
+    """Attempt a single tier. Handles key rotation for cloud providers. Returns (result, error_reason)."""
     tier_num = tier_def["tier"]
     provider = tier_def["provider"]
 
     # Circuit breaker gate
     if is_circuit_open(tier_num):
         logger.info(f"[CASCADE] Tier {tier_num} ({tier_def['name']}) — Circuit OPEN, skipping.")
-        return None
+        return None, "Circuit Open"
 
     # OpenAI-format: rotate through available keys
     keys = _KEY_POOL.get(provider, [])
     if not keys:
         logger.debug(f"[CASCADE] Tier {tier_num} ({tier_def['name']}) — No API keys configured, skipping.")
-        return None
+        return None, "No API Key"
 
+    last_error = "Unknown"
     for key in keys:
-        result = await _call_openai_format(client, tier_def, messages, key, image_data, json_mode)
+        result, error_reason = await _call_openai_format(client, tier_def, messages, key, image_data, json_mode)
         if result:
             record_success(tier_num)
-            return result
+            return result, None
+        if error_reason:
+            last_error = error_reason
 
-    return None
+    return None, last_error
 
 
 async def cascade_async(messages: list, eligible_tiers: set, image_data: str = None, json_mode: bool = False) -> Tuple[Optional[str], str]:
@@ -233,11 +236,11 @@ async def cascade_async(messages: list, eligible_tiers: set, image_data: str = N
                 details.append(f"T{tier_def['tier']}: Circuit Open")
                 continue
                 
-            result = await _try_tier(client, tier_def, messages, image_data, json_mode)
+            result, error_reason = await _try_tier(client, tier_def, messages, image_data, json_mode)
             if result:
                 return result, f"T{tier_def['tier']}_{tier_def['name']}"
             else:
-                details.append(f"T{tier_def['tier']}: Failed/Timeout")
+                details.append(f"T{tier_def['tier']}: {error_reason}")
 
     return None, "EXHAUSTED: " + ", ".join(details)
 
