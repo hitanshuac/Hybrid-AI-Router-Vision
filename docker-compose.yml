@@ -35,6 +35,8 @@ services:
       - WEBUI_SECRET_KEY=72c593371df2aa390ec5e6167d4e7b79857076720c0d98991387d711d9889ba3
       - CORS_ALLOW_ORIGIN=http://localhost:3000
       - HF_TOKEN=your_huggingface_token_here
+      - WEBUI_AUTH_COOKIE_SAME_SITE=none
+      - WEBUI_SESSION_COOKIE_SAME_SITE=none
     volumes:
       - open-webui-data:/app/backend/data
     networks:
