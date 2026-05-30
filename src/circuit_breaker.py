@@ -25,11 +25,11 @@ class CircuitBreakerOpenException(Exception):
 CENTIPEDE_TOKEN_THRESHOLD = 8_000
 
 # Tiers allowed when payload EXCEEDS 8k tokens (high-context capable)
-# Tier 3 = Gemini Flash 1M, Tier 4 = Qwen-2.5-Coder, Tier 6 = Phi-3-128k-Free
-HIGH_CONTEXT_TIERS: Set[int] = {3, 4, 6}
+# Tier 2 = Gemini 2.5 Flash (1M context), Tier 3 = OpenRouter/Gemma-4 (high context)
+HIGH_CONTEXT_TIERS: Set[int] = {2, 3}
 
-# All tiers
-ALL_TIERS: Set[int] = set(range(1, 11))
+# All tiers (4-tier vision-only cascade)
+ALL_TIERS: Set[int] = set(range(1, 5))
 
 
 def estimate_tokens(prompt: str) -> int:

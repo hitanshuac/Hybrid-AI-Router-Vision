@@ -55,10 +55,10 @@ OPENROUTER_API_KEYS = get_secrets_list('openrouter_api_key')
 NVIDIA_API_KEYS = get_secrets_list('nvidia_api_key')
 GEMINI_API_KEYS = get_secrets_list('gemini_api_key')
 
-# Simplified Defaults
-PRIMARY_CLOUD_MODEL = "llama-3.3-70b-versatile"
-SECONDARY_CLOUD_MODEL = "google/gemma-4-31b-it:free"
-SAFETY_NET_MODEL = "meta/llama-3.1-8b-instruct"
+# Vision-Only Cascade Model Defaults (documentation only — TIERS in router.py is authoritative)
+PRIMARY_VISION_MODEL = "llama-3.2-11b-vision-preview"
+SECONDARY_VISION_MODEL = "gemini-2.5-flash"
+SAFETY_NET_VISION_MODEL = "meta/llama-3.2-90b-vision-instruct"
 # Startup log — show key counts (never values) for observability
 logger.info(
     f"[CONFIG] Keys loaded — Groq:{len(GROQ_API_KEYS)} "

@@ -1,9 +1,10 @@
 """
-Hybrid AI Router — 9-Tier Cascade Engine (Vision Edition)
-=========================================================
+Hybrid AI Router — 4-Tier Vision-Only Cascade Engine
+=====================================================
 Strict fallback waterfall using async HTTP clients.
 Integrates SRE Centipede Guardrails (circuit breaker + token preflight).
-Supports dynamic selection of Vision models when multimodal payloads are detected.
+Every tier is a unique vision-capable model+provider combination.
+Zero duplicate endpoints. Zero rate limit waste.
 
 v3.0.0 — Offsite Deployment Edition
 """
@@ -34,94 +35,40 @@ logger = logging.getLogger("router")
 TIERS = [
     {
         "tier": 1,
-        "name": "Groq/Llama3-70b",
+        "name": "Groq/Llama-3.2-Vision",
         "provider": "groq",
-        "model": "llama-3.3-70b-versatile",
-        "vision_model": "llama-3.2-11b-vision-preview",
+        "model": "llama-3.2-11b-vision-preview",
         "url": "https://api.groq.com/openai/v1/chat/completions",
         "timeout": 15,
         "format": "openai",
     },
     {
         "tier": 2,
-        "name": "Groq/Mixtral",
-        "provider": "groq",
-        "model": "mixtral-8x7b-32768",
-        "vision_model": "llama-3.2-11b-vision-preview",
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "timeout": 15,
-        "format": "openai",
-    },
-    {
-        "tier": 3,
-        "name": "AIStudio/Gemini-Flash",
+        "name": "Gemini/2.5-Flash-Vision",
         "provider": "gemini",
-        "model": "gemini-1.5-flash",
-        "vision_model": "gemini-2.5-flash",
+        "model": "gemini-2.5-flash",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "timeout": 30,
         "format": "openai",
     },
     {
+        "tier": 3,
+        "name": "OpenRouter/Gemma-4-Vision",
+        "provider": "openrouter",
+        "model": "google/gemma-4-31b-it:free",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "timeout": 20,
+        "format": "openai",
+    },
+    {
         "tier": 4,
-        "name": "OpenRouter/Qwen-2.5-Coder",
-        "provider": "openrouter",
-        "model": "qwen/qwen-2.5-coder-32b-instruct:free",
-        "vision_model": "google/gemini-2.5-flash",
-        "url": "https://openrouter.ai/api/v1/chat/completions",
-        "timeout": 20,
-        "format": "openai",
-    },
-    {
-        "tier": 5,
-        "name": "OpenRouter/Llama-3-8B-Free",
-        "provider": "openrouter",
-        "model": "meta-llama/llama-3-8b-instruct:free",
-        "vision_model": "google/gemini-2.5-flash",
-        "url": "https://openrouter.ai/api/v1/chat/completions",
-        "timeout": 20,
-        "format": "openai",
-    },
-    {
-        "tier": 6,
-        "name": "OpenRouter/Phi-3-128k-Free",
-        "provider": "openrouter",
-        "model": "microsoft/phi-3-medium-128k-instruct:free",
-        "vision_model": "google/gemini-2.5-flash",
-        "url": "https://openrouter.ai/api/v1/chat/completions",
-        "timeout": 20,
-        "format": "openai",
-    },
-    {
-        "tier": 7,
-        "name": "NVIDIA-NIM/Llama-3",
+        "name": "NVIDIA/Llama-3.2-90B-Vision",
         "provider": "nvidia",
-        "model": "meta/llama-3.1-8b-instruct",
-        "vision_model": "meta/llama-3.2-90b-vision-instruct",
+        "model": "meta/llama-3.2-90b-vision-instruct",
         "url": "https://integrate.api.nvidia.com/v1/chat/completions",
         "timeout": 15,
         "format": "openai",
     },
-    {
-        "tier": 8,
-        "name": "NVIDIA-NIM/Mistral-Nemo",
-        "provider": "nvidia",
-        "model": "mistralai/mistral-nemo-12b-instruct",
-        "vision_model": "meta/llama-3.2-90b-vision-instruct",
-        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
-        "timeout": 15,
-        "format": "openai",
-    },
-    {
-        "tier": 9,
-        "name": "NVIDIA-NIM/Qwen2.5-72B",
-        "provider": "nvidia",
-        "model": "qwen/qwen2.5-72b-instruct",
-        "vision_model": "meta/llama-3.2-90b-vision-instruct",
-        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
-        "timeout": 15,
-        "format": "openai",
-    }
 ]
 
 # ============================================================
@@ -212,7 +159,7 @@ async def _call_openai_format(
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     
     # Select model based on whether image_data is present
-    active_model = tier_def.get("vision_model", tier_def["model"]) if image_data else tier_def["model"]
+    active_model = tier_def["model"]  # Every tier IS a vision model — no switching needed
 
     payload = {"model": active_model, "messages": messages}
 
@@ -312,7 +259,7 @@ def cascade_sync(messages: list, eligible_tiers: set, image_data: str = None) ->
 # ============================================================
 def classify_and_route(prompt, image_data=None, messages=None):
     """
-    Routing logic with the v3.0.0 pipeline:
+    Routing logic with the v3.0.0 vision-only pipeline:
     1. Deep Copy  2. Grounding  3. Prefix Stripping  4. Sliding Window
     5. Preflight Token Check  6. Cascade
 
@@ -374,7 +321,7 @@ def classify_and_route(prompt, image_data=None, messages=None):
 
         if response is None:
             return (
-                "All 9 tiers exhausted. Check API keys and cloud endpoints.",
+                "All 4 vision tiers exhausted. Check API keys and cloud endpoints.",
                 "ALL_EXHAUSTED",
                 compaction_metrics,
             )

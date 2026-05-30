@@ -49,3 +49,7 @@ chroma_db/
 # Antigravity Multi-Agent Memory storage
 .antigravity/
 agents/
+
+# HF Spaces deployment artifacts
+hf-recovery/
+hf-webui/
