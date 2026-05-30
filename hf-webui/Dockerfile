@@ -2,4 +2,6 @@ FROM ghcr.io/open-webui/open-webui:main
 ENV ENABLE_OLLAMA_API="False"
 ENV OPENAI_API_BASE_URL="https://hitanshuac-hybrid-ai-router-vision.hf.space/v1"
 ENV OPENAI_API_KEY="sk-antigravity"
-ENV WEBUI_SECRET_KEY="antigravity_secret_key_2026"
+ENV WEBUI_SECRET_KEY="72c593371df2aa390ec5e6167d4e7b79857076720c0d98991387d711d9889ba3"
+ENV CORS_ALLOW_ORIGIN="https://hitanshuac-hybrid-router-webui.hf.space"
+ENV HF_TOKEN="your_huggingface_token_here"
