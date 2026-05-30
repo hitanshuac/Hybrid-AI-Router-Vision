@@ -55,7 +55,7 @@ TIERS = [
         "tier": 3,
         "name": "OpenRouter/Gemma-4-Vision",
         "provider": "openrouter",
-        "model": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "model": "google/gemma-4-31b-it:free",
         "url": "https://openrouter.ai/api/v1/chat/completions",
         "timeout": 45,
         "format": "openai",
@@ -222,22 +222,24 @@ async def cascade_async(messages: list, eligible_tiers: set, image_data: str = N
     Execute the 9-tier waterfall cascade asynchronously.
     Returns (response_text, tier_label) or (None, "EXHAUSTED").
     """
+    details = []
     async with httpx.AsyncClient() as client:
         for tier_def in TIERS:
             if tier_def["tier"] not in eligible_tiers:
-                logger.info(
-                    f"[CASCADE] Tier {tier_def['tier']} ({tier_def['name']}) — "
-                    f"Skipped (not in eligible set)."
-                )
+                details.append(f"T{tier_def['tier']}: Skipped")
                 continue
-
-            logger.info(f"[CASCADE] Trying Tier {tier_def['tier']}: {tier_def['name']}...")
+            
+            if is_circuit_open(tier_def["tier"]):
+                details.append(f"T{tier_def['tier']}: Circuit Open")
+                continue
+                
             result = await _try_tier(client, tier_def, messages, image_data, json_mode)
             if result:
-                logger.info(f"[CASCADE] ✅ Tier {tier_def['tier']} ({tier_def['name']}) responded.")
                 return result, f"T{tier_def['tier']}_{tier_def['name']}"
+            else:
+                details.append(f"T{tier_def['tier']}: Failed/Timeout")
 
-    return None, "EXHAUSTED"
+    return None, "EXHAUSTED: " + ", ".join(details)
 
 
 def cascade_sync(messages: list, eligible_tiers: set, image_data: str = None, json_mode: bool = False) -> Tuple[Optional[str], str]:
@@ -325,7 +327,7 @@ def classify_and_route(prompt, image_data=None, messages=None):
 
         if response is None:
             return (
-                "All 4 vision tiers exhausted. Check API keys and cloud endpoints.",
+                f"All 4 vision tiers exhausted. {tier_label}",
                 "ALL_EXHAUSTED",
                 compaction_metrics,
             )

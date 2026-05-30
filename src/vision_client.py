@@ -72,7 +72,7 @@ def _sync_pipeline_execution(base64_data: str) -> tuple[DocumentType, dict]:
         response_text, tier = cascade_sync(messages, eligible_tiers=set(range(1, 5)))
         
         if not response_text or response_text == "ALL_EXHAUSTED":
-            raise RuntimeError("Vision Cascade exhausted. No providers available for classification.")
+            raise RuntimeError(f"Vision Cascade exhausted during classification. {tier}")
 
         determined_type = response_text.strip().upper()
         
@@ -105,7 +105,7 @@ def _sync_pipeline_execution(base64_data: str) -> tuple[DocumentType, dict]:
     response_text, tier = cascade_sync(messages, eligible_tiers=set(range(1, 5)), json_mode=True)
     
     if not response_text or response_text == "ALL_EXHAUSTED":
-        raise RuntimeError("Vision Cascade exhausted. No providers available for JSON extraction.")
+            raise RuntimeError(f"Vision Cascade exhausted during JSON extraction. {tier}")
 
     try:
         extracted_data = json.loads(response_text)
